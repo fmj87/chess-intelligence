@@ -1,8 +1,6 @@
 import streamlit as st
 import requests
-import json
 import os
-import re
 import chess
 import chess.engine
 import matplotlib.pyplot as plt
@@ -10,146 +8,139 @@ import seaborn as sns
 import numpy as np
 import pandas as pd
 import stat
-import urllib.request
-import tarfile
 
 # --- 1. CONFIGURAZIONE E TRADUZIONI ---
-if 'lang' not in st.session_state: 
+if 'lang' not in st.session_state:
     st.session_state.lang = "IT"
 
 translations = {
     "IT": {
         "title": "♟️ Chess Intelligence Pro",
-        "warning": "⚠️ Configurazione Motore in corso...",
         "report_card": "📝 Pagella Tecnica",
-        "tactics_table": "⚔️ Analisi Tattica (Stockfish)",
+        "tactics_table": "⚔️ Analisi Tattica (Stockfish 13)",
         "coach_section": "👨‍🏫 Area Coaching Personale",
         "xp_level": "✨ Livello & XP",
-        "analysis_btn": "🚀 Avvia Analisi Profonda",
+        "analysis_btn": "🚀 Analizza mia ultima partita Chess.com",
         "heatmap": "🔥 Mappa Controllo Territorio",
         "elo_est": "📈 ELO Stimato",
-        "status_ready": "✅ Motore Pronto",
-        "status_loading": "⏳ Scaricamento Stockfish..."
+        "status_ready": "✅ Motore SF 13 Online",
+        "status_error": "❌ Motore non trovato"
     },
     "EN": {
         "title": "♟️ Chess Intelligence Pro",
-        "warning": "⚠️ Engine Configuration in progress...",
         "report_card": "📝 Technical Report Card",
-        "tactics_table": "⚔️ Tactical Analysis (Stockfish)",
+        "tactics_table": "⚔️ Tactical Analysis (Stockfish 13)",
         "coach_section": "👨‍🏫 Personal Coaching Area",
         "xp_level": "✨ Level & XP",
-        "analysis_btn": "🚀 Start Deep Analysis",
+        "analysis_btn": "🚀 Analyze my last Chess.com game",
         "heatmap": "🔥 Territory Control Map",
         "elo_est": "📈 Estimated ELO",
-        "status_ready": "✅ Engine Ready",
-        "status_loading": "⏳ Downloading Stockfish..."
+        "status_ready": "✅ Engine SF 13 Online",
+        "status_error": "❌ Engine not found"
     }
 }
 T = translations[st.session_state.lang]
 st.set_page_config(page_title="Chess Intelligence Pro", layout="wide")
 
-# --- 2. DOWNLOADER AUTOMATICO STOCKFISH (SOLUZIONE B) ---
-@st.cache_resource
-def setup_stockfish():
-    engine_dir = "engine"
-    engine_path = os.path.join(engine_dir, "stockfish_app")
+# --- 2. SETUP MOTORE LOCALE (Il file caricato da te) ---
+def setup_local_engine():
+    # Il file deve chiamarsi esattamente 'stockfish' su GitHub
+    engine_path = os.path.join(os.getcwd(), "stockfish")
     
-    if not os.path.exists(engine_path):
-        if not os.path.exists(engine_dir):
-            os.makedirs(engine_dir)
-        
-        # URL di un binario Stockfish 16/17 già estratto (RAW)
-        # Usiamo un mirror che permette il download diretto
-        url = "https://raw.githubusercontent.com/nmrugg/stockfish.js/master/bin/stockfish"
-        
+    if os.path.exists(engine_path):
         try:
-            with st.spinner("Configurazione motore in corso..."):
-                # Download diretto del file binario
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req) as response, open(engine_path, 'wb') as out_file:
-                    out_file.write(response.read())
-                
-                # Permessi Linux
-                os.chmod(engine_path, os.stat(engine_path).st_mode | stat.S_IEXEC)
-                return engine_path
-        except Exception as e:
-            st.error(f"Errore: {e}")
-            return None
-    return engine_path
-    
-# --- 3. LOGICA DI ANALISI ---
-def analizza_partita(fen):
-    path = setup_stockfish()
-    if path:
-        try:
-            with chess.engine.SimpleEngine.popen_uci(path) as engine:
-                board = chess.Board(fen)
-                info = engine.analyse(board, chess.engine.Limit(depth=12))
-                return info
+            # Diamo i permessi di esecuzione per il server Linux
+            st_file = os.stat(engine_path)
+            os.chmod(engine_path, st_file.st_mode | stat.S_IEXEC)
+            return engine_path
         except:
             return None
     return None
 
+# --- 3. LOGICA DI ANALISI ---
+def analizza_partita(fen, engine_path):
+    try:
+        with chess.engine.SimpleEngine.popen_uci(engine_path) as engine:
+            board = chess.Board(fen)
+            # Analisi rapida a profondità 12 per velocità
+            info = engine.analyse(board, chess.engine.Limit(depth=12))
+            return info
+    except Exception as e:
+        st.error(f"Errore analisi: {e}")
+        return None
+
 # --- 4. INTERFACCIA UTENTE ---
 st.title(T["title"])
 
-# Verifica motore all'avvio
-engine_ready_path = setup_stockfish()
-if engine_ready_path:
+# Verifica motore locale
+engine_path = setup_local_engine()
+if engine_path:
     st.sidebar.success(T["status_ready"])
 else:
-    st.sidebar.warning(T["status_loading"])
+    st.sidebar.error(T["status_error"])
 
 # Sidebar Profilo & XP
 with st.sidebar:
     st.header("👤 Profilo Giocatore")
-    user = st.text_input("Username Chess.com/Lichess", "User123")
+    user = st.text_input("Username Chess.com", "GMHikaru") # Default un pro per test
     st.divider()
     st.write(f"{T['xp_level']}: Level 15")
     st.progress(0.85)
-    st.session_state.lang = st.selectbox("Lingua", ["IT", "EN"])
+    st.session_state.lang = st.selectbox("Lingua / Language", ["IT", "EN"])
 
-# Layout
+# Layout Principale
 col_main, col_side = st.columns([2, 1])
 
 with col_main:
     if st.button(T["analysis_btn"]):
-        with st.spinner("Analisi Stockfish in corso..."):
-            # Esempio: Posizione dopo 1.e4 e5 2.Nf3 Nc6 3.Bc4 Nf6 4.Ng5
-            test_fen = "r1bqkb1r/pppp1ppp/2n2n2/4p1N1/2B1P3/8/PPPP1PPP/RNBQK2R b KQkq - 5 4"
-            results = analizza_partita(test_fen)
+        if not engine_path:
+            st.error("Carica il file 'stockfish' su GitHub prima di analizzare!")
+        else:
+            with st.spinner(f"Recupero ultima partita di {user}..."):
+                try:
+                    # API Chess.com
+                    headers = {'User-Agent': 'ChessIntelligencePro/1.0'}
+                    res = requests.get(f"https://api.chess.com/pub/player/{user}/games/latest", headers=headers)
+                    data = res.json()
+                    
+                    if 'games' in data and len(data['games']) > 0:
+                        last_fen = data['games'][-1]['fen']
+                        st.info(f"Analisi posizione finale della partita contro: {data['games'][-1]['black'] if user.lower() in data['games'][-1]['white'].lower() else data['games'][-1]['white']}")
+                    else:
+                        st.warning("Nessuna partita trovata. Uso posizione di test.")
+                        last_fen = "r1bqkb1r/pppp1ppp/2n2n2/4p1N1/2B1P3/8/PPPP1PPP/RNBQK2R b KQkq - 5 4"
 
-            # Pagella V1
-            st.subheader(T["report_card"])
-            voti = {"Apertura": 9.0, "Tattica": 4.5, "Mediogioco": 6.0, "Finale": 7.0}
-            st.table(pd.DataFrame([voti]).T.rename(columns={0: "Voto"}))
+                    # Analisi Stockfish
+                    results = analizza_partita(last_fen, engine_path)
 
-            # Tabella Tattica
-            st.subheader(T["tactics_table"])
-            t_col1, t_col2 = st.columns(2)
-            t_col1.success("✅ Tattica Riconosciuta: Difesa del Fegatello")
-            t_col2.error("❌ Tattica Mancata: Contro-attacco Traxler")
+                    if results:
+                        score = results['score'].relative.score()
+                        st.metric("Valutazione Motore", f"{score/100 if score else 0.0:+2.1f}")
+                        
+                        # Pagella
+                        st.subheader(T["report_card"])
+                        voti = {"Apertura": 8.5, "Tattica": 7.2, "Mediogioco": 6.5, "Finale": 9.0}
+                        st.table(pd.DataFrame([voti]).T.rename(columns={0: "Voto"}))
 
-            # Coaching & Risorse (YouTube & Puzzle)
-            st.divider()
-            st.subheader(T["coach_section"])
-            st.info("💡 **Consiglio del Coach**: La tua visione tattica cala sotto pressione. Ripassa i pattern di difesa.")
-            
-            r_col1, r_col2 = st.columns(2)
-            r_col1.markdown("### 📺 Video Lezione\n[Guarda Tutorial Apertura](https://www.youtube.com/results?search_query=fried+liver+attack+defense)")
-            r_col2.markdown("### 🧩 Puzzle Training\n[Esercitati qui](https://lichess.org/training/friedLiverAttack)")
+                        # Tabella Tattica
+                        st.subheader(T["tactics_table"])
+                        t_col1, t_col2 = st.columns(2)
+                        t_col1.success("✅ Precisione Apertura: Ottima")
+                        t_col2.info(f"Profondità raggiunta: {results.get('depth', 'N/A')}")
+
+                except Exception as e:
+                    st.error(f"Errore durante il processo: {e}")
 
 with col_side:
     st.subheader(T["elo_est"])
-    st.metric("Rating Estimato", "1620 ELO", "+15")
+    st.metric("Rating Stimato", "1620 ELO", "+15")
     
     st.subheader(T["heatmap"])
-    # Generazione Heatmap Reale
+    # Generazione Heatmap
     fig, ax = plt.subplots(figsize=(4,4))
-    heatmap_data = np.random.rand(8,8) # Mock data per controllo territorio
+    heatmap_data = np.random.rand(8,8) 
     sns.heatmap(heatmap_data, cmap="YlOrRd", cbar=False, ax=ax, xticklabels=False, yticklabels=False)
     st.pyplot(fig)
 
 st.sidebar.divider()
-st.sidebar.caption("Sviluppato per la community degli scacchi.")
+st.sidebar.caption("Sviluppato con Stockfish 13 BMI2")
