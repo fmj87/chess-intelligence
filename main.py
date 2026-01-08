@@ -58,32 +58,35 @@ def setup_stockfish():
         if not os.path.exists(engine_dir):
             os.makedirs(engine_dir)
         
-        # Link a un binario Stockfish ospitato su un mirror affidabile
-        url = "https://github.com/official-stockfish/Stockfish/releases/download/sf_16.1/stockfish-ubuntu-x86-64-avx2.tar.gz"
+        # LINK DIRETTO (Mirror stabile per evitare il 404 di GitHub)
+        # Questa versione è Stockfish 17.1 per Linux x64
+        url = "https://stockfishchess.org/files/stockfish-ubuntu-x86-64-avx2.tar.gz"
         
         try:
-            with st.spinner("Scarico il motore (78MB)... attendi un istante."):
+            # Emuliamo un browser per sicurezza
+            opener = urllib.request.build_opener()
+            opener.addheaders = [('User-agent', 'Mozilla/5.0')]
+            urllib.request.install_opener(opener)
+            
+            with st.spinner("Scaricamento Stockfish 17.1 in corso..."):
                 file_tmp = "stockfish.tar.gz"
-                # Scarichiamo il pacchetto pesante
                 urllib.request.urlretrieve(url, file_tmp)
                 
-                # Estraiamo solo il binario che ci serve
                 with tarfile.open(file_tmp, "r:gz") as tar:
                     tar.extractall(path=engine_dir)
                 
-                # Individuiamo il file estratto e lo rinominiamo
+                # Cerchiamo il binario ed eseguiamo lo spostamento
                 for root, dirs, files in os.walk(engine_dir):
                     for file in files:
                         if "stockfish" in file and ".gz" not in file:
                             os.replace(os.path.join(root, file), engine_path)
                             break
                 
-                # Permessi di esecuzione
                 os.chmod(engine_path, os.stat(engine_path).st_mode | stat.S_IEXEC)
                 os.remove(file_tmp)
                 return engine_path
         except Exception as e:
-            st.error(f"Errore: {e}")
+            st.error(f"Errore download 17.1: {e}")
             return None
     return engine_path
     
