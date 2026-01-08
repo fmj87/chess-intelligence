@@ -131,7 +131,7 @@ with st.sidebar:
     st.divider()
     level = st.session_state.xp // 100
     st.write(f"{T['xp_level']}: Level {level}")
-    st.progress((st.session_state.xp % 100) / 100)
+    st.progress(min((st.session_state.xp % 100) / 100, 1.0))
     st.session_state.lang = st.selectbox("Lingua", ["IT", "EN"])
     
     engine_path = setup_local_engine()
@@ -154,11 +154,12 @@ with col_main:
     if 'game_pgn' in st.session_state and st.session_state.full_analysis:
         # GRAFICO ANDAMENTO
         st.subheader(T["graph_title"])
-        y = st.session_state.full_analysis["evals"]
+        y = np.array(st.session_state.full_analysis["evals"])
+        x = np.arange(len(y))
         fig, ax = plt.subplots(figsize=(10, 2.5))
-        ax.plot(y, color='#4CAF50', linewidth=2)
-        ax.fill_between(range(len(y)), y, 0, where=(np.array(y) > 0), color='white', alpha=0.1)
-        ax.fill_between(range(len(y)), y, 0, where=(np.array(y) < 0), color='red', alpha=0.1)
+        ax.plot(x, y, color='#4CAF50', linewidth=2)
+        ax.fill_between(x, y, 0, where=(y > 0), color='white', alpha=0.1, interpolate=True)
+        ax.fill_between(x, y, 0, where=(y < 0), color='red', alpha=0.1, interpolate=True)
         ax.axhline(0, color='gray', linestyle='--', linewidth=0.5)
         ax.set_facecolor('#0E1117')
         fig.patch.set_facecolor('#0E1117')
@@ -181,15 +182,15 @@ with col_main:
             score = results['score'].relative.score(mate_score=1000) / 100
             st.metric(T["live_eval"], f"{score:+2.1f}")
 
-        # PAGELLA MIGLIORATA
+        # PAGELLA
         st.subheader(T["report_card"])
         blunders = st.session_state.full_analysis["blunders"]
         mistakes = st.session_state.full_analysis["mistakes"]
         voto_tattica = max(1, 10 - (blunders * 2) - (mistakes * 0.5))
-        voti = {"Apertura": 8.0, "Tattica": voto_tattica, "Mediogioco": 7.5, "Finale": 6.0}
+        voti = {"Apertura": 8.0, "Tattica": round(voto_tattica, 1), "Mediogioco": 7.5, "Finale": 6.0}
         st.table(pd.DataFrame([voti]).T.rename(columns={0: "Voto"}))
 
-        # ANALISI TATTICA MIGLIORATA
+        # ANALISI TATTICA
         st.subheader(T["tactics_table"])
         tattiche_df = pd.DataFrame({
             "Tipo Errore": ["Grandi Errori (Blunder)", "Inesattezze (Mistakes)", "Precisione"],
@@ -197,7 +198,7 @@ with col_main:
         })
         st.table(tattiche_df)
 
-        # COACHING MIGLIORATO
+        # COACHING
         st.divider()
         st.subheader(T["coach_section"])
         if blunders > 0:
