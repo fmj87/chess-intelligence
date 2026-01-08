@@ -85,7 +85,7 @@ def get_chess_game(username):
     except: return None
     return None
 
-# --- 3. LOGICA DI ANALISI PROFONDA ---
+# --- 3. LOGICA DI ANALISI ---
 def analyze_game_full(pgn_str, engine_path):
     pgn = io.StringIO(pgn_str)
     game = chess.pgn.read_game(pgn)
@@ -97,43 +97,38 @@ def analyze_game_full(pgn_str, engine_path):
     with chess.engine.SimpleEngine.popen_uci(engine_path) as engine:
         for move in game.mainline_moves():
             board.push(move)
-            info = engine.analyse(board, chess.engine.Limit(time=0.05))
+            info = engine.analyse(board, chess.engine.Limit(time=0.04))
             score = info["score"].relative.score(mate_score=10000) / 100
             evals.append(score)
-            
             if len(evals) > 1:
                 diff = abs(evals[-1] - evals[-2])
                 if diff > 3.0: blunders += 1
                 elif diff > 1.5: mistakes += 1
-                
     return {"evals": evals, "blunders": blunders, "mistakes": mistakes}
 
-def analizza_posizione(fen, engine_path):
+def analizza_posizione_live(fen, engine_path):
     try:
         with chess.engine.SimpleEngine.popen_uci(engine_path) as engine:
             board = chess.Board(fen)
-            return engine.analyse(board, chess.engine.Limit(depth=14))
+            info = engine.analyse(board, chess.engine.Limit(depth=12))
+            return info
     except: return None
 
-# --- 4. INTERFACCIA UTENTE (SIDEBAR) ---
+# --- 4. SIDEBAR ---
 st.title(T["title"])
-
 with st.sidebar:
     st.header("👤 Profilo Giocatore")
     user = st.text_input("Username Chess.com", "User123")
-    
     if user.lower() == "admin":
         st.warning(T["admin_panel"])
         if st.button("Reset Engine Cache"):
             st.cache_resource.clear()
             st.success("Cache pulita!")
-            
     st.divider()
     level = st.session_state.xp // 100
     st.write(f"{T['xp_level']}: Level {level}")
     st.progress(min((st.session_state.xp % 100) / 100, 1.0))
     st.session_state.lang = st.selectbox("Lingua", ["IT", "EN"])
-    
     engine_path = setup_local_engine()
     if engine_path: st.success(T["status_ready"])
     else: st.error(T["status_error"])
@@ -143,7 +138,7 @@ col_main, col_side = st.columns([2, 1])
 
 with col_main:
     if st.button(T["analysis_btn"]):
-        with st.spinner("Analisi in corso... Stockfish sta leggendo la partita..."):
+        with st.spinner("Analisi profonda in corso..."):
             game_data = get_chess_game(user)
             if game_data and 'pgn' in game_data:
                 st.session_state.game_pgn = game_data['pgn']
@@ -152,21 +147,19 @@ with col_main:
                 st.success("Analisi completata!")
 
     if 'game_pgn' in st.session_state and st.session_state.full_analysis:
-        # GRAFICO ANDAMENTO
+        # GRAFICO
         st.subheader(T["graph_title"])
-        y = np.array(st.session_state.full_analysis["evals"])
-        x = np.arange(len(y))
+        y_vals = np.array(st.session_state.full_analysis["evals"])
         fig, ax = plt.subplots(figsize=(10, 2.5))
-        ax.plot(x, y, color='#4CAF50', linewidth=2)
-        ax.fill_between(x, y, 0, where=(y > 0), color='white', alpha=0.1, interpolate=True)
-        ax.fill_between(x, y, 0, where=(y < 0), color='red', alpha=0.1, interpolate=True)
+        ax.plot(y_vals, color='#4CAF50', linewidth=2)
+        ax.fill_between(range(len(y_vals)), y_vals, 0, where=(y_vals > 0), color='white', alpha=0.1)
+        ax.fill_between(range(len(y_vals)), y_vals, 0, where=(y_vals < 0), color='red', alpha=0.1)
         ax.axhline(0, color='gray', linestyle='--', linewidth=0.5)
-        ax.set_facecolor('#0E1117')
-        fig.patch.set_facecolor('#0E1117')
+        ax.set_facecolor('#0E1117'); fig.patch.set_facecolor('#0E1117')
         ax.tick_params(colors='white', labelsize=8)
         st.pyplot(fig)
 
-        # SLIDER E SCACCHIERA
+        # SLIDER E NAVIGAZIONE
         pgn_io = io.StringIO(st.session_state.game_pgn)
         game = chess.pgn.read_game(pgn_io)
         moves = list(game.mainline_moves())
@@ -176,45 +169,37 @@ with col_main:
         for i in range(move_idx): board_nav.push(moves[i])
         st.markdown(render_board(board_nav.fen(), moves[move_idx-1] if move_idx > 0 else None), unsafe_allow_html=True)
 
-        # VALUTAZIONE LIVE
-        results = analizza_posizione(board_nav.fen(), engine_path)
-        if results:
-            score = results['score'].relative.score(mate_score=1000) / 100
-            st.metric(T["live_eval"], f"{score:+2.1f}")
+        # ANALISI LIVE (DURANTE LO SLIDER)
+        with st.spinner("Valutazione mossa..."):
+            res_live = analizza_posizione_live(board_nav.fen(), engine_path)
+            if res_live:
+                sc = res_live['score'].relative.score(mate_score=1000) / 100
+                st.metric(T["live_eval"], f"{sc:+2.1f}")
 
-        # PAGELLA
+        # PAGELLA E TABELLE
         st.subheader(T["report_card"])
         blunders = st.session_state.full_analysis["blunders"]
         mistakes = st.session_state.full_analysis["mistakes"]
-        voto_tattica = max(1, 10 - (blunders * 2) - (mistakes * 0.5))
-        voti = {"Apertura": 8.0, "Tattica": round(voto_tattica, 1), "Mediogioco": 7.5, "Finale": 6.0}
-        st.table(pd.DataFrame([voti]).T.rename(columns={0: "Voto"}))
+        v_tattica = round(max(1, 10 - (blunders * 2) - (mistakes * 0.5)), 1)
+        st.table(pd.DataFrame([{"Apertura": 8.0, "Tattica": v_tattica, "Mediogioco": 7.5, "Finale": 6.0}]).T.rename(columns={0: "Voto"}))
 
-        # ANALISI TATTICA
         st.subheader(T["tactics_table"])
-        tattiche_df = pd.DataFrame({
-            "Tipo Errore": ["Grandi Errori (Blunder)", "Inesattezze (Mistakes)", "Precisione"],
-            "Conteggio": [blunders, mistakes, f"{max(0, 100-(blunders*10))}%"]
-        })
-        st.table(tattiche_df)
+        st.table(pd.DataFrame({
+            "Dettaglio": ["Blunders", "Mistakes", "Precisione"],
+            "Valore": [blunders, mistakes, f"{max(0, 100-(blunders*10))}%"]
+        }))
 
-        # COACHING
         st.divider()
         st.subheader(T["coach_section"])
-        if blunders > 0:
-            st.error(f"💡 **Coach**: Hai commesso {blunders} errori gravi. Guarda i picchi rossi nel grafico per capire dove hai perso vantaggio.")
-        else:
-            st.info("💡 **Coach**: Partita molto solida! Non hai commesso errori gravi. Continua così.")
+        if blunders > 0: st.error(f"💡 **Coach**: Hai fatto {blunders} errori gravi. Studia i cali nel grafico.")
+        else: st.info("💡 **Coach**: Ottima partita, molto solida.")
 
 with col_side:
     st.subheader(T["elo_est"])
-    elo = 1000 + (level * 50)
-    st.metric("Rating Stimato", f"{elo} ELO", "+15")
-    
+    st.metric("Rating Stimato", f"{1000 + (level * 50)} ELO", "+15")
     st.subheader(T["heatmap"])
     fig_h, ax_h = plt.subplots(figsize=(4,4))
     sns.heatmap(np.random.rand(8,8), cmap="RdYlGn", cbar=False, ax=ax_h, xticklabels=False, yticklabels=False)
     st.pyplot(fig_h)
 
-st.sidebar.divider()
-st.sidebar.caption("Chess Intelligence Pro - Full Analysis Mode")
+st.sidebar.caption("Chess Intelligence Pro v2.3")
