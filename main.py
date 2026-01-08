@@ -58,35 +58,23 @@ def setup_stockfish():
         if not os.path.exists(engine_dir):
             os.makedirs(engine_dir)
         
-        # LINK DIRETTO (Mirror stabile per evitare il 404 di GitHub)
-        # Questa versione è Stockfish 17.1 per Linux x64
-        url = "https://stockfishchess.org/files/stockfish-ubuntu-x86-64-avx2.tar.gz"
+        # URL di un binario Stockfish 16/17 già estratto (RAW)
+        # Usiamo un mirror che permette il download diretto
+        url = "https://raw.githubusercontent.com/nmrugg/stockfish.js/master/bin/stockfish"
         
         try:
-            # Emuliamo un browser per sicurezza
-            opener = urllib.request.build_opener()
-            opener.addheaders = [('User-agent', 'Mozilla/5.0')]
-            urllib.request.install_opener(opener)
-            
-            with st.spinner("Scaricamento Stockfish 17.1 in corso..."):
-                file_tmp = "stockfish.tar.gz"
-                urllib.request.urlretrieve(url, file_tmp)
+            with st.spinner("Configurazione motore in corso..."):
+                # Download diretto del file binario
+                headers = {'User-Agent': 'Mozilla/5.0'}
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req) as response, open(engine_path, 'wb') as out_file:
+                    out_file.write(response.read())
                 
-                with tarfile.open(file_tmp, "r:gz") as tar:
-                    tar.extractall(path=engine_dir)
-                
-                # Cerchiamo il binario ed eseguiamo lo spostamento
-                for root, dirs, files in os.walk(engine_dir):
-                    for file in files:
-                        if "stockfish" in file and ".gz" not in file:
-                            os.replace(os.path.join(root, file), engine_path)
-                            break
-                
+                # Permessi Linux
                 os.chmod(engine_path, os.stat(engine_path).st_mode | stat.S_IEXEC)
-                os.remove(file_tmp)
                 return engine_path
         except Exception as e:
-            st.error(f"Errore download 17.1: {e}")
+            st.error(f"Errore: {e}")
             return None
     return engine_path
     
