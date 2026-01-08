@@ -6,4 +6,3 @@ matplotlib
 seaborn
 numpy
 requests
-stockfish
