@@ -18,7 +18,7 @@ import io
 if 'lang' not in st.session_state:
     st.session_state.lang = "IT"
 if 'xp' not in st.session_state:
-    st.session_state.xp = 1850 # Valore Level 18
+    st.session_state.xp = 1850 
 
 translations = {
     "IT": {
@@ -137,8 +137,16 @@ with col_main:
             game_data = get_chess_game(user)
             if game_data and 'pgn' in game_data:
                 st.session_state.game_pgn = game_data['pgn']
-                st.session_state.xp += 10 # Bonus XP per l'analisi
-                st.success(f"Partita contro {game_data.get('white' if user.lower() not in game_data.get('white','').lower() else 'black')} caricata!")
+                st.session_state.xp += 10 
+                
+                # FIX ATTRIBUTE ERROR: Estrazione sicura degli username
+                w_data = game_data.get('white', {})
+                b_data = game_data.get('black', {})
+                w_user = w_data.get('username', 'White') if isinstance(w_data, dict) else str(w_data)
+                b_user = b_data.get('username', 'Black') if isinstance(b_data, dict) else str(b_data)
+                
+                opponent = b_user if user.lower() == w_user.lower() else w_user
+                st.success(f"Partita contro {opponent} caricata!")
             else:
                 st.error("Partita non trovata. Controlla lo username.")
 
@@ -152,7 +160,6 @@ with col_main:
                                     options=range(len(moves) + 1), 
                                     value=len(moves))
         
-        # Ricostruzione posizione
         board_nav = game.board()
         last_m = None
         for i in range(move_idx):
@@ -161,18 +168,13 @@ with col_main:
         
         st.markdown(render_board(board_nav.fen(), last_m), unsafe_allow_html=True)
         
-        # Analisi in tempo reale per la mossa selezionata
         with st.spinner("Stockfish analizza questa posizione..."):
             results = analizza_posizione(board_nav.fen(), engine_path)
             if results:
                 score_obj = results['score'].relative
-                if score_obj.is_mate():
-                    score_val = f"M{score_obj.mate()}"
-                else:
-                    score_val = f"{score_obj.score() / 100:+2.1f}"
+                score_val = f"M{score_obj.mate()}" if score_obj.is_mate() else f"{score_obj.score() / 100:+2.1f}"
                 st.metric(T["live_eval"], score_val)
 
-        # Feature Ripristinate
         st.subheader(T["report_card"])
         voti = {"Apertura": 8.2, "Tattica": 6.5, "Mediogioco": 7.0, "Finale": 5.5}
         st.table(pd.DataFrame([voti]).T.rename(columns={0: "Voto"}))
