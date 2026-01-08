@@ -51,33 +51,42 @@ st.set_page_config(page_title="Chess Intelligence Pro", layout="wide")
 # --- 2. DOWNLOADER AUTOMATICO STOCKFISH (SOLUZIONE B) ---
 @st.cache_resource
 def setup_stockfish():
-    engine_dir = "stockfish_engine"
-    engine_path = os.path.abspath(os.path.join(engine_dir, "stockfish_app"))
+    engine_dir = "engine"
+    engine_path = os.path.join(engine_dir, "stockfish_app")
     
     if not os.path.exists(engine_path):
         if not os.path.exists(engine_dir):
             os.makedirs(engine_dir)
         
-        # LINK ALTERNATIVO (Versione Linux x64)
-        # Questo link è diretto e non dovrebbe dare errori 404
-        url = "https://raw.githubusercontent.com/nmrugg/stockfish.js/master/bin/stockfish"
+        # Link a un binario Stockfish ospitato su un mirror affidabile
+        url = "https://github.com/official-stockfish/Stockfish/releases/download/sf_16.1/stockfish-ubuntu-x86-64-avx2.tar.gz"
         
         try:
-            # Scarichiamo il file
-            opener = urllib.request.build_opener()
-            opener.addheaders = [('User-agent', 'Mozilla/5.0')]
-            urllib.request.install_opener(opener)
-            
-            urllib.request.urlretrieve(url, engine_path)
-            
-            # Applichiamo i permessi
-            if os.path.exists(engine_path):
+            with st.spinner("Scarico il motore (78MB)... attendi un istante."):
+                file_tmp = "stockfish.tar.gz"
+                # Scarichiamo il pacchetto pesante
+                urllib.request.urlretrieve(url, file_tmp)
+                
+                # Estraiamo solo il binario che ci serve
+                with tarfile.open(file_tmp, "r:gz") as tar:
+                    tar.extractall(path=engine_dir)
+                
+                # Individuiamo il file estratto e lo rinominiamo
+                for root, dirs, files in os.walk(engine_dir):
+                    for file in files:
+                        if "stockfish" in file and ".gz" not in file:
+                            os.replace(os.path.join(root, file), engine_path)
+                            break
+                
+                # Permessi di esecuzione
                 os.chmod(engine_path, os.stat(engine_path).st_mode | stat.S_IEXEC)
+                os.remove(file_tmp)
                 return engine_path
         except Exception as e:
-            st.error(f"⚠️ Errore nel download: {e}")
+            st.error(f"Errore: {e}")
             return None
     return engine_path
+    
 # --- 3. LOGICA DI ANALISI ---
 def analizza_partita(fen):
     path = setup_stockfish()
