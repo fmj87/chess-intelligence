@@ -58,28 +58,26 @@ def setup_stockfish():
         if not os.path.exists(engine_dir):
             os.makedirs(engine_dir)
         
-        # URL DIRETTO AL BINARIO (Senza compressione, meno errori)
-        # Questa è la versione specifica per Linux x64
-        url = "https://github.com/official-stockfish/Stockfish/releases/download/sf_16.1/stockfish-ubuntu-x86-64-avx2"
+        # LINK ALTERNATIVO (Versione Linux x64)
+        # Questo link è diretto e non dovrebbe dare errori 404
+        url = "https://raw.githubusercontent.com/nmrugg/stockfish.js/master/bin/stockfish"
         
         try:
-            # User-Agent per emulare il browser
+            # Scarichiamo il file
             opener = urllib.request.build_opener()
             opener.addheaders = [('User-agent', 'Mozilla/5.0')]
             urllib.request.install_opener(opener)
             
-            # Scarichiamo direttamente il file nel percorso finale
             urllib.request.urlretrieve(url, engine_path)
             
-            # Diamo i permessi di esecuzione
+            # Applichiamo i permessi
             if os.path.exists(engine_path):
                 os.chmod(engine_path, os.stat(engine_path).st_mode | stat.S_IEXEC)
                 return engine_path
         except Exception as e:
-            st.error(f"⚠️ Errore nel download diretto: {e}")
+            st.error(f"⚠️ Errore nel download: {e}")
             return None
     return engine_path
-
 # --- 3. LOGICA DI ANALISI ---
 def analizza_partita(fen):
     path = setup_stockfish()
