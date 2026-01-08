@@ -1,0 +1,9 @@
+streamlit
+chess
+python-chess
+pandas
+matplotlib
+seaborn
+numpy
+requests
+stockfish
