@@ -77,15 +77,31 @@ def render_board(fen, last_move=None):
     return f'<img src="data:image/svg+xml;base64,{b64}" style="width:100%; max-width:400px; border-radius: 10px;"/>'
 
 def get_chess_game(username):
-    headers = {'User-Agent': 'ChessIntelligencePro/1.0 (contact: tech@chessintel.com)'}
+    # L'identificativo deve essere univoco per non essere bloccati da Chess.com
+    headers = {'User-Agent': 'ChessIntelligencePro_App_v1.0 (Contact: user@example.com)'}
     try:
-        res = requests.get(f"https://api.chess.com/pub/player/{username}/games/latest", headers=headers, timeout=5)
-        if res.status_code == 200 and 'games' in res.json() and len(res.json()['games']) > 0:
-            return res.json()['games'][-1]
-    except: return None
+        # Tentativo 1: Ultime partite dirette
+        res = requests.get(f"https://api.chess.com/pub/player/{username}/games/latest", headers=headers, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            if 'games' in data and len(data['games']) > 0:
+                return data['games'][-1]
+        
+        # Tentativo 2: Archivio se il primo fallisce (spesso più affidabile)
+        res_arch = requests.get(f"https://api.chess.com/pub/player/{username}/games/archives", headers=headers, timeout=10)
+        if res_arch.status_code == 200:
+            archives = res_arch.json().get('archives', [])
+            if archives:
+                last_month_url = archives[-1]
+                res_month = requests.get(last_month_url, headers=headers, timeout=10)
+                if res_month.status_code == 200:
+                    games = res_month.json().get('games', [])
+                    if games:
+                        return games[-1]
+    except Exception as e:
+        st.sidebar.error(f"Errore API: {e}")
     return None
 
-# Funzione per analizzare l'intera partita e generare il grafico
 def analyze_full_game(pgn_str, engine_path):
     pgn = io.StringIO(pgn_str)
     game = chess.pgn.read_game(pgn)
@@ -123,7 +139,7 @@ with st.sidebar:
     st.divider()
     level = st.session_state.xp // 100
     st.write(f"{T['xp_level']}: Level {level}")
-    st.progress((st.session_state.xp % 100) / 100)
+    st.progress(min((st.session_state.xp % 100) / 100, 1.0))
     
     st.session_state.lang = st.selectbox("Lingua", ["IT", "EN"])
     
@@ -136,15 +152,16 @@ col_main, col_side = st.columns([2, 1])
 
 with col_main:
     if st.button(T["analysis_btn"]):
-        with st.spinner("Analisi completa della partita in corso..."):
+        with st.spinner("Cercando e analizzando l'ultima partita..."):
             game_data = get_chess_game(user)
             if game_data and 'pgn' in game_data:
                 st.session_state.game_pgn = game_data['pgn']
-                st.session_state.game_analysis = analyze_full_game(game_data['pgn'], engine_path)
+                if engine_path:
+                    st.session_state.game_analysis = analyze_full_game(game_data['pgn'], engine_path)
                 st.session_state.xp += 20 
-                st.success("Partita analizzata con successo!")
+                st.success("Partita caricata con successo!")
             else:
-                st.error("Partita non trovata.")
+                st.error("Partita non trovata. Assicurati che lo username sia corretto e che l'account sia pubblico.")
 
     if 'game_pgn' in st.session_state:
         # GRAFICO DELL'ANDAMENTO
@@ -177,55 +194,37 @@ with col_main:
         
         st.markdown(render_board(board_nav.fen(), last_m), unsafe_allow_html=True)
         
-        results = analizza_posizione(board_nav.fen(), engine_path)
-        if results:
-            score_obj = results['score'].relative
-            score_val = f"M{score_obj.mate()}" if score_obj.is_mate() else f"{score_obj.score() / 100:+2.1f}"
-            st.metric(T["live_eval"], score_val)
+        if engine_path:
+            results = analizza_posizione(board_nav.fen(), engine_path)
+            if results:
+                score_obj = results['score'].relative
+                score_val = f"M{score_obj.mate()}" if score_obj.is_mate() else f"{score_obj.score() / 100:+2.1f}"
+                st.metric(T["live_eval"], score_val)
 
-        # PAGELLA TECNICA MIGLIORATA
         st.subheader(T["report_card"])
-        # Calcolo dinamico basato sull'analisi se disponibile
         score_avg = np.mean(np.abs(st.session_state.game_analysis)) if st.session_state.game_analysis else 5.0
-        voti = {
-            "Apertura": 8.2, 
-            "Tattica": round(min(10, 6.5 + (score_avg/10)), 1), 
-            "Mediogioco": 7.0, 
-            "Finale": 5.5
-        }
+        voti = {"Apertura": 8.2, "Tattica": round(min(10, 6.5 + (score_avg/10)), 1), "Mediogioco": 7.0, "Finale": 5.5}
         st.table(pd.DataFrame([voti]).T.rename(columns={0: "Voto"}))
 
-        # ANALISI TATTICA
         st.subheader(T["tactics_table"])
-        tattiche_data = {
-            "Categoria": ["Forchetta", "Infilata", "Attacco Scoperto", "Sacrificio"],
-            "Fatte (✅)": [5, 2, 1, 0],
-            "Perse (❌)": [1, 3, 0, 2]
-        }
+        tattiche_data = {"Categoria": ["Forchetta", "Infilata", "Attacco Scoperto", "Sacrificio"], "Fatte (✅)": [5, 2, 1, 0], "Perse (❌)": [1, 3, 0, 2]}
         st.table(pd.DataFrame(tattiche_data))
 
-        # TIME MANAGEMENT
         st.subheader(T["time_mgmt"])
         t_col1, t_col2 = st.columns(2)
         t_col1.metric("Velocità Media", "12s / mossa")
-        t_col2.warning("⚠️ Hai speso troppo tempo (45s) alla mossa 14!")
+        t_col2.warning("⚠️ Tempo critico mossa 14")
 
         st.divider()
         st.subheader(T["coach_section"])
-        if score_avg > 2:
-            st.info("💡 **Coach**: Ottima pressione tattica. Continua a cercare queste linee forzanti.")
-        else:
-            st.error("💡 **Coach**: Troppe imprecisioni nel mediogioco. Rivedi i momenti in cui il grafico scende bruscamente.")
+        st.info("💡 **Coach**: Analizza i picchi nel grafico per capire dove hai perso il vantaggio.")
 
 with col_side:
     st.subheader(T["elo_est"])
     st.metric("Rating Stimato", "1580 ELO", "+24")
-    
     st.subheader(T["heatmap"])
     fig, ax = plt.subplots(figsize=(4,4))
-    # Heatmap reale basata sulla posizione corrente
-    heatmap_data = np.random.rand(8,8) 
-    sns.heatmap(heatmap_data, cmap="RdYlGn", cbar=False, ax=ax, xticklabels=False, yticklabels=False)
+    sns.heatmap(np.random.rand(8,8), cmap="RdYlGn", cbar=False, ax=ax, xticklabels=False, yticklabels=False)
     st.pyplot(fig)
 
 st.sidebar.divider()
