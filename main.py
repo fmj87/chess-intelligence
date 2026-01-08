@@ -13,605 +13,820 @@ import stat
 import base64
 import time
 import io
+import re
+import random
 from datetime import datetime
+from collections import Counter
+import math
 
 # ==============================================================================
-# 1. CONFIGURAZIONE, STILE E STATO DELL'APPLICAZIONE
+# 0. COSTANTI E CONFIGURAZIONE GLOBALE
 # ==============================================================================
+
+CONSTANTS = {
+    "APP_TITLE": "♟️ Chess Intelligence Pro",
+    "VERSION": "3.0.0 Ultra-Coach Edition",
+    "ENGINE_LIMIT_TIME": 0.1,  # Secondi per mossa (bilanciamento velocità/precisione)
+    "ENGINE_DEPTH": 15,
+    "THEME": {
+        "bg": "#0e1117",
+        "secondary": "#262730",
+        "accent": "#4CAF50",
+        "danger": "#FF5252",
+        "warning": "#FFC107",
+        "info": "#2196F3"
+    }
+}
 
 st.set_page_config(
-    page_title="Chess Intelligence Pro",
+    page_title=CONSTANTS["APP_TITLE"],
     page_icon="♟️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Iniezione di CSS personalizzato per migliorare l'estetica (Dark Mode Friendly)
-st.markdown("""
+# ==============================================================================
+# 1. CSS & STYLING AVANZATO
+# ==============================================================================
+
+st.markdown(f"""
 <style>
-    .stApp {
-        background-color: #0e1117;
-    }
-    div[data-testid="stMetricValue"] {
-        font-size: 24px;
-        color: #4CAF50;
-    }
-    .report-card {
+    /* Global Styles */
+    .stApp {{
+        background-color: {CONSTANTS["THEME"]["bg"]};
+    }}
+    
+    /* Metrics Customization */
+    div[data-testid="stMetricValue"] {{
+        font-size: 26px;
+        font-weight: bold;
+        color: {CONSTANTS["THEME"]["accent"]};
+    }}
+    
+    /* Report Card Styling */
+    .report-card {{
+        background-color: {CONSTANTS["THEME"]["secondary"]};
+        padding: 20px;
+        border-radius: 12px;
+        border-left: 5px solid {CONSTANTS["THEME"]["accent"]};
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }}
+    
+    /* Narrative Box */
+    .narrative-box {{
+        background-color: #1c1f26;
         padding: 15px;
-        border-radius: 10px;
-        background-color: #262730;
-        border: 1px solid #4CAF50;
-        margin-bottom: 10px;
-    }
-    .css-1d391kg {
-        padding-top: 1rem;
-    }
+        border-radius: 8px;
+        border: 1px solid #444;
+        font-family: 'Courier New', monospace;
+        color: #e0e0e0;
+        margin-top: 10px;
+    }}
+    
+    /* Coaching Tip Box */
+    .coach-tip {{
+        background-color: rgba(33, 150, 243, 0.15);
+        border: 1px solid {CONSTANTS["THEME"]["info"]};
+        padding: 15px;
+        border-radius: 8px;
+        margin-top: 10px;
+    }}
+    
+    /* Critical Error Box */
+    .critical-error {{
+        background-color: rgba(255, 82, 82, 0.15);
+        border: 1px solid {CONSTANTS["THEME"]["danger"]};
+        padding: 15px;
+        border-radius: 8px;
+    }}
+    
+    /* Headers */
+    h1, h2, h3 {{
+        font-family: 'Helvetica Neue', sans-serif;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
-# Inizializzazione Session State
-if 'lang' not in st.session_state:
-    st.session_state.lang = "IT"
-if 'xp' not in st.session_state:
-    st.session_state.xp = 1850 
-if 'game_analysis' not in st.session_state:
-    st.session_state.game_analysis = None
-if 'game_pgn' not in st.session_state:
-    st.session_state.game_pgn = None
-if 'current_fen' not in st.session_state:
-    st.session_state.current_fen = chess.STARTING_FEN
+# ==============================================================================
+# 2. STATE MANAGEMENT & LOCALIZZAZIONE
+# ==============================================================================
 
-# Dizionario Traduzioni (Feature: Multilingua)
-translations = {
-    "IT": {
-        "title": "♟️ Chess Intelligence Pro",
-        "report_card": "📝 Pagella Tecnica",
-        "tactics_table": "⚔️ Analisi Tattica (SF 13)",
-        "coach_section": "👨‍🏫 Area Coaching Personale",
-        "xp_level": "✨ Livello & XP",
-        "analysis_btn": "🚀 Carica e Analizza Partita",
-        "heatmap": "🔥 Mappa Controllo Territorio",
-        "elo_est": "📈 ELO Stimato",
-        "status_ready": "✅ Motore SF 13 Online",
-        "status_error": "❌ Motore non trovato",
-        "admin_panel": "🔑 Pannello Admin (Sbloccato)",
-        "time_mgmt": "⏱️ Time Management",
-        "live_eval": "📊 Valutazione Live",
-        "graph_title": "📈 Andamento Vantaggio",
-        "loading": "Analisi in corso... attendere prego",
-        "game_loaded": "Partita caricata con successo!",
-        "game_not_found": "Partita non trovata. Controlla username o archivi.",
-        "move_slider": "🎞️ Scorri la partita mossa per mossa"
-    },
-    "EN": {
-        "title": "♟️ Chess Intelligence Pro",
-        "report_card": "📝 Technical Report Card",
-        "tactics_table": "⚔️ Tactical Analysis (SF 13)",
-        "coach_section": "👨‍🏫 Personal Coaching Area",
-        "xp_level": "✨ Level & XP",
-        "analysis_btn": "🚀 Load & Analyze Game",
-        "heatmap": "🔥 Territory Control Map",
-        "elo_est": "📈 Estimated ELO",
-        "status_ready": "✅ Engine SF 13 Online",
-        "status_error": "❌ Engine not found",
-        "admin_panel": "🔑 Admin Panel (Unlocked)",
-        "time_mgmt": "⏱️ Time Management",
-        "live_eval": "📊 Live Evaluation",
-        "graph_title": "📈 Advantage Graph",
-        "loading": "Analysis in progress... please wait",
-        "game_loaded": "Game loaded successfully!",
-        "game_not_found": "Game not found. Check username or archives.",
-        "move_slider": "🎞️ Replay game move by move"
-    }
+# Inizializzazione Session State con valori di default robusti
+default_states = {
+    'lang': "IT",
+    'xp': 1850,
+    'game_analysis': None,      # Conterrà oggetti MoveAnalysis
+    'game_pgn': None,
+    'current_fen': chess.STARTING_FEN,
+    'puzzle_mode': False,
+    'active_puzzle': None,
+    'coach_messages': [],
+    'user_stats': {'wins': 0, 'losses': 0, 'draws': 0}
 }
 
+for key, val in default_states.items():
+    if key not in st.session_state:
+        st.session_state[key] = val
+
+translations = {
+    "IT": {
+        "title": CONSTANTS["APP_TITLE"],
+        "report_card": "📝 Pagella Tecnica Avanzata",
+        "tactics_table": "⚔️ Analisi Tattica & Errori",
+        "coach_section": "👨‍🏫 Coach Virtuale & Psicologia",
+        "xp_level": "✨ Livello & XP",
+        "analysis_btn": "🚀 Avvia Analisi Profonda",
+        "heatmap": "🔥 Mappa Controllo & Tensione",
+        "elo_est": "📈 Performance Rating",
+        "status_ready": "✅ Motore Neurale Online",
+        "status_error": "❌ Motore non trovato",
+        "admin_panel": "🔑 Admin Console",
+        "time_mgmt": "⏱️ Gestione Tempo & Ritmo",
+        "live_eval": "📊 Valutazione in Tempo Reale",
+        "graph_title": "📈 Flusso della Partita",
+        "loading": "Analisi neurale in corso... decodifica pattern...",
+        "game_loaded": "Partita analizzata con successo!",
+        "game_not_found": "Partita non trovata o API limitata.",
+        "move_slider": "🎞️ Replay Narrativo",
+        "why_move": "🧠 Analisi del 'Perché'",
+        "puzzles": "🧩 Puzzle Generati dai Tuoi Errori",
+        "video_rec": "📺 Video Consigliati per Te"
+    },
+    "EN": {
+        "title": CONSTANTS["APP_TITLE"],
+        "report_card": "📝 Advanced Technical Report",
+        "tactics_table": "⚔️ Tactical & Error Analysis",
+        "coach_section": "👨‍🏫 Virtual Coach & Psychology",
+        "xp_level": "✨ Level & XP",
+        "analysis_btn": "🚀 Start Deep Analysis",
+        "heatmap": "🔥 Control & Tension Map",
+        "elo_est": "📈 Performance Rating",
+        "status_ready": "✅ Neural Engine Online",
+        "status_error": "❌ Engine not found",
+        "admin_panel": "🔑 Admin Console",
+        "time_mgmt": "⏱️ Time & Pace Management",
+        "live_eval": "📊 Real-Time Evaluation",
+        "graph_title": "📈 Game Flow",
+        "loading": "Neural analysis running... decoding patterns...",
+        "game_loaded": "Game analyzed successfully!",
+        "game_not_found": "Game not found or API limited.",
+        "move_slider": "🎞️ Narrative Replay",
+        "why_move": "🧠 'Why' Analysis",
+        "puzzles": "🧩 Puzzles From Your Mistakes",
+        "video_rec": "📺 Recommended Videos"
+    }
+}
 T = translations[st.session_state.lang]
 
 # ==============================================================================
-# 2. GESTIONE MOTORE SCACCHISTICO (LOCAL ENGINE)
+# 3. CLASSI DI DATI E ANALISI (BACKEND LOGIC)
+# ==============================================================================
+
+class MoveAnalysis:
+    """Classe per memorizzare i dati analitici di una singola mossa."""
+    def __init__(self, move_san, fen, score, best_move, classification, time_spent=0.0, comments=""):
+        self.move_san = move_san
+        self.fen = fen
+        self.score = score  # Centipawns (float)
+        self.best_move = best_move
+        self.classification = classification # "Best", "Good", "Inaccuracy", "Mistake", "Blunder", "Book"
+        self.time_spent = time_spent
+        self.comments = comments
+        self.narrative = "" # Spiegazione testuale generata
+
+class GameStats:
+    """Contenitore per le statistiche aggregate della partita."""
+    def __init__(self):
+        self.accuracies = []
+        self.openings_accuracy = 0
+        self.middlegame_accuracy = 0
+        self.endgame_accuracy = 0
+        self.blunders = 0
+        self.mistakes = 0
+        self.inaccuracies = 0
+        self.brilliant_moves = 0
+        self.time_trouble_count = 0
+        self.avg_time_per_move = 0
+        self.psych_profile = [] # Lista di stringhe (tag psicologici)
+
+# ==============================================================================
+# 4. ENGINE WRAPPER & UTILS
 # ==============================================================================
 
 def setup_local_engine():
-    """
-    Feature: Setup del motore locale.
-    Cerca il file binario 'stockfish' nella directory corrente,
-    gestisce i permessi di esecuzione e restituisce il percorso.
-    """
-    engine_filename = "stockfish" 
-    # Supporto base per Windows se necessario, altrimenti assume Linux/Mac come da codice originale
-    if os.name == 'nt':
-        engine_filename = "stockfish.exe"
-
+    """Setup motore robusto con fallback per OS diversi."""
+    engine_filename = "stockfish.exe" if os.name == 'nt' else "stockfish"
     engine_path = os.path.join(os.getcwd(), engine_filename)
     
     if os.path.exists(engine_path):
         try:
-            # Imposta permessi di esecuzione (Feature robustezza)
             st_file = os.stat(engine_path)
             os.chmod(engine_path, st_file.st_mode | stat.S_IEXEC)
             return engine_path
         except Exception as e:
-            # Log silenzioso dell'errore
-            print(f"Errore permessi engine: {e}")
+            st.error(f"Engine Permission Error: {e}")
             return None
     return None
 
 def check_engine_health(engine_path):
-    """Verifica rapida se il motore risponde."""
-    if not engine_path:
-        return False
+    if not engine_path: return False
     try:
         with chess.engine.SimpleEngine.popen_uci(engine_path) as engine:
             engine.ping()
         return True
-    except:
-        return False
+    except: return False
 
-# ==============================================================================
-# 3. INTERAZIONI API E DATA FETCHING
-# ==============================================================================
-
-@st.cache_data(ttl=300)
 def get_chess_game(username):
     """
-    Feature: Integrazione API Chess.com.
-    Scarica l'ultima partita giocata dall'utente.
-    Include gestione header User-Agent per evitare blocchi.
+    Recupera l'ultima partita con gestione avanzata degli archivi
+    e parsing preliminare per assicurarsi che sia valida.
     """
     headers = {
-        'User-Agent': 'ChessIntelligencePro_App_v2.0 (Contact: admin@chessintel.pro)',
+        'User-Agent': 'ChessIntelligencePro_Coach/3.0 (contact: admin@chessintel.pro)',
         'Accept': 'application/json'
     }
-    
     base_url = f"https://api.chess.com/pub/player/{username}"
     
     try:
-        # Tentativo 1: Endpoint 'games/latest' (Partite in corso o appena finite)
-        # Nota: API Chess.com a volte non aggiorna 'latest' istantaneamente per partite archiviate
-        res = requests.get(f"{base_url}/games", headers=headers, timeout=8)
-        # Questo endpoint spesso restituisce partite in corso.
-        # Preferiamo cercare negli archivi per una partita conclusa.
-        
-        # Tentativo 2: Endpoint archivi (Strategia più affidabile)
-        res_arch = requests.get(f"{base_url}/games/archives", headers=headers, timeout=8)
-        
+        res_arch = requests.get(f"{base_url}/games/archives", headers=headers, timeout=10)
         if res_arch.status_code == 200:
             archives = res_arch.json().get('archives', [])
             if archives:
-                # Prendi l'ultimo mese disponibile
-                last_month_url = archives[-1]
-                res_month = requests.get(last_month_url, headers=headers, timeout=10)
-                
-                if res_month.status_code == 200:
-                    games = res_month.json().get('games', [])
-                    if games:
-                        # Restituisce l'ultima partita della lista del mese
-                        return games[-1]
-                        
-    except requests.exceptions.Timeout:
-        st.sidebar.error("Timeout connessione API Chess.com")
+                # Prova gli ultimi 3 mesi in caso di inattività recente
+                for url in reversed(archives[-3:]):
+                    res_month = requests.get(url, headers=headers, timeout=10)
+                    if res_month.status_code == 200:
+                        games = res_month.json().get('games', [])
+                        if games:
+                            # Filtra partite valide (non aborted)
+                            valid_games = [g for g in games if g.get('rules') == 'chess']
+                            if valid_games:
+                                return valid_games[-1]
     except Exception as e:
-        st.sidebar.error(f"Errore API Generico: {e}")
-        
+        st.sidebar.error(f"API Error: {e}")
+    return None
+
+def extract_time_from_comment(comment):
+    """Estrae il tempo rimanente dal commento PGN standard [%clk H:MM:SS]."""
+    if not comment: return None
+    match = re.search(r'\[%clk\s+(\d+):(\d+):(\d+(\.\d+)?)\]', comment)
+    if match:
+        h, m, s = match.group(1), match.group(2), match.group(3)
+        return float(h)*3600 + float(m)*60 + float(s)
     return None
 
 # ==============================================================================
-# 4. CORE ANALYTICS E LOGICA SCACCHISTICA
+# 5. CORE INTELLIGENCE: ANALISI, NARRATIVA, PSICOLOGIA
 # ==============================================================================
 
-def analyze_full_game(pgn_str, engine_path):
+def analyze_game_deep(pgn_str, engine_path, username):
     """
-    Feature: Analisi Completa Partita.
-    Esegue Stockfish su ogni mossa e restituisce una lista di valutazioni.
+    Cuore del sistema. Esegue:
+    1. Analisi motore mossa per mossa.
+    2. Classificazione mosse (Blunder/Mistake/etc).
+    3. Parsing dei tempi.
+    4. Generazione narrativa del "Perché".
+    5. Profilazione psicologica.
     """
-    if not engine_path:
-        # Fallback simulato se non c'è il motore, per non rompere la UI
-        return [0.1, 0.2, 0.0, -0.3, -0.5, 0.0, 0.2]
+    if not engine_path: return None, None
 
     pgn = io.StringIO(pgn_str)
     game = chess.pgn.read_game(pgn)
-    
-    if game is None:
-        return []
-
     board = game.board()
-    evals = []
     
-    # Progress bar per feedback utente
-    progress_bar = st.progress(0)
-    move_count = sum(1 for _ in game.mainline_moves())
-    current_move = 0
-
-    try:
-        with chess.engine.SimpleEngine.popen_uci(engine_path) as engine:
-            # Imposta opzioni motore per velocità
-            engine.configure({"Hash": 16, "Threads": 1})
+    # Identifica colore utente
+    white_player = game.headers.get("White", "Unknown")
+    user_color = chess.WHITE if white_player.lower() == username.lower() else chess.BLACK
+    
+    analysis_results = []
+    stats = GameStats()
+    
+    prev_score = 0.0 # CP relativo al giocatore
+    prev_time = None
+    
+    # Setup Engine
+    with chess.engine.SimpleEngine.popen_uci(engine_path) as engine:
+        engine.configure({"Hash": 32, "Threads": 2})
+        
+        moves = list(game.mainline_moves())
+        node = game
+        
+        total_moves = len(moves)
+        progress_bar = st.progress(0)
+        
+        for i, move in enumerate(moves):
+            # 1. Avanza nel nodo PGN per leggere commenti/tempi
+            node = node.variation(0)
             
-            for move in game.mainline_moves():
-                board.push(move)
-                # Analisi rapida (0.05s per mossa) per performance
-                info = engine.analyse(board, chess.engine.Limit(time=0.06))
+            # Calcolo tempo
+            current_time_left = extract_time_from_comment(node.comment)
+            time_spent = 0
+            if prev_time is not None and current_time_left is not None:
+                time_spent = max(0, prev_time - current_time_left)
+                # Gestione incremento (euristica: se spent < 0 probabilmente c'è incremento)
+                if time_spent == 0: time_spent = 1 # Minimo nominale
+            prev_time = current_time_left
+            
+            # 2. Analisi Motore (Posizione CORRENTE dopo la mossa)
+            board.push(move)
+            
+            # Analizziamo la posizione per ottenere lo score
+            info = engine.analyse(board, chess.engine.Limit(time=CONSTANTS["ENGINE_LIMIT_TIME"]))
+            
+            # Score relativo al giocatore che ha mosso
+            score_pov = info["score"].pov(board.turn).score(mate_score=10000)
+            score_cp = score_pov / 100.0 if score_pov is not None else 0.0
+            
+            # Per valutare la qualità della mossa, dobbiamo guardare lo score 
+            # DALLA PROSPETTIVA DI CHI HA APPENA MOSSO (che ora è l'avversario nel turno, quindi invertiamo)
+            # Ma più semplicemente: confrontiamo il cambio di valutazione.
+            
+            # Recuperiamo la mossa migliore suggerita dal motore nella posizione PRECEDENTE
+            # (Per fare questo accuratamente servirebbe analizzare PRIMA di fare la mossa,
+            # qui usiamo una euristica basata sul delta score per velocità)
+            
+            # Delta Score (dal punto di vista di chi ha mosso)
+            # Se sono bianco e passo da +1 a +0.5, delta è -0.5
+            current_eval_pov = info["score"].pov(not board.turn).score(mate_score=10000) / 100.0
+            delta = current_eval_pov - prev_score
+            
+            # Classificazione
+            classification = "Good"
+            narrative = ""
+            
+            if i < 10: classification = "Book" # Semplificazione apertura
+            elif delta <= -2.0: classification = "Blunder"
+            elif delta <= -1.0: classification = "Mistake"
+            elif delta <= -0.5: classification = "Inaccuracy"
+            elif delta >= 0.5: classification = "Great"
+            elif delta >= 1.5: classification = "Brilliant" # Raro
+            
+            # Aggiornamento Statistiche (Solo per l'utente)
+            is_user_move = (board.turn == (not user_color)) # Dato che abbiamo già fatto push, turn è invertito
+            
+            if is_user_move:
+                stats.accuracies.append(max(0, 100 - abs(delta * 20)))
+                if classification == "Blunder": stats.blunders += 1
+                elif classification == "Mistake": stats.mistakes += 1
+                elif classification == "Inaccuracy": stats.inaccuracies += 1
+                elif classification in ["Great", "Brilliant"]: stats.brilliant_moves += 1
                 
-                # Normalizzazione punteggio: PovScore -> float
-                score_val = info["score"].relative.score(mate_score=10000)
-                if score_val is None: score_val = 0
+                # --- SISTEMA ANALISI NARRATIVA DEL "PERCHÉ" ---
+                narrative = generate_narrative_why(board, move, delta, classification, time_spent)
                 
-                # Cap dei valori per evitare grafici illeggibili
-                score_normalized = max(min(score_val / 100, 15), -15)
-                evals.append(score_normalized)
-                
-                current_move += 1
-                if move_count > 0:
-                    progress_bar.progress(min(current_move / move_count, 1.0))
-                    
-    except Exception as e:
-        st.error(f"Errore durante l'analisi motore: {e}")
-        return []
-    finally:
-        progress_bar.empty()
+                # --- RILEVAMENTO PATTERN PSICOLOGICI ---
+                detect_psychology(stats, delta, time_spent, classification, i, total_moves)
 
-    return evals
+            # Store Analysis
+            best_mv_san = "-" # Placeholder per ottimizzazione (richiederebbe seconda analisi)
+            
+            res_obj = MoveAnalysis(
+                move_san=board.san_and_push(move) if False else game.board().variation_san(moves[:i+1]), # Workaround per SAN corretto
+                fen=board.fen(),
+                score=current_eval_pov,
+                best_move=best_mv_san,
+                classification=classification,
+                time_spent=time_spent,
+                comments=node.comment
+            )
+            res_obj.narrative = narrative
+            analysis_results.append(res_obj)
+            
+            prev_score = current_eval_pov
+            progress_bar.progress((i + 1) / total_moves)
 
-def analizza_posizione(fen, engine_path):
-    """
-    Feature: Valutazione Live singola posizione.
-    Restituisce l'oggetto info completo.
-    """
-    if not engine_path: 
-        return None
-        
-    try:
-        with chess.engine.SimpleEngine.popen_uci(engine_path) as engine:
-            board = chess.Board(fen)
-            # Analisi leggermente più profonda per la posizione statica visualizzata
-            info = engine.analyse(board, chess.engine.Limit(depth=15))
-            return info
-    except:
-        return None
+    # Finalizzazione Statistiche
+    if stats.accuracies:
+        mid = len(stats.accuracies) // 3
+        stats.openings_accuracy = np.mean(stats.accuracies[:10]) if len(stats.accuracies) > 10 else 90
+        stats.middlegame_accuracy = np.mean(stats.accuracies[10:mid*2]) if len(stats.accuracies) > 20 else 80
+        stats.endgame_accuracy = np.mean(stats.accuracies[mid*2:]) if len(stats.accuracies) > mid*2 else 70
 
-def generate_heatmap_data(board):
+    return analysis_results, stats
+
+def generate_narrative_why(board, move, delta, classification, time_spent):
     """
-    Feature: Heatmap Controllo Territorio.
-    Sostituisce il random con una mappa di 'tensione' basata sulla posizione dei pezzi.
+    Genera una spiegazione in linguaggio naturale del perché una mossa è buona o cattiva.
     """
-    # Matrice 8x8 inizializzata a 0
-    matrix = np.zeros((8, 8))
+    reasons = []
     
-    # Mappa semplice: conta quanti pezzi attaccano o difendono una casa
-    # (Semplificazione computazionale per evitare overhead eccessivo)
-    for square in chess.SQUARES:
-        rank = chess.square_rank(square)
-        file = chess.square_file(square)
+    # 1. Controllo Materiale
+    # Verifica se c'è stata cattura
+    if board.is_capture(move):
+        reasons.append("Scambio materiale.")
+        if delta < -1:
+            reasons.append("Hai catturato un pezzo avvelenato o indifeso.")
+    
+    # 2. Controllo Re (Check)
+    if board.is_check():
+        reasons.append("Mossa aggressiva che mette sotto scacco il Re.")
+    
+    # 3. Logica Blunder
+    if classification == "Blunder":
+        if time_spent and time_spent < 3:
+            reasons.append("Hai giocato troppo in fretta (Impulsività).")
+        reasons.append("Questa mossa perde materiale significativo o permette un attacco forzato.")
+        # Euristiche semplici posizionali
+        if not board.is_capture(move) and delta < -3:
+            reasons.append("Probabilmente hai lasciato un pezzo in presa.")
+            
+    # 4. Logica Mistake/Inaccuracy
+    elif classification == "Mistake":
+        reasons.append("Mossa passiva. C'era un'opportunità tattica migliore.")
         
-        # Aggiungi valore se c'è un pezzo (peso posizionale)
-        piece = board.piece_at(square)
-        if piece:
-            val = 1.0 if piece.color == chess.WHITE else -1.0
-            # Centro ha più valore
-            if 2 <= rank <= 5 and 2 <= file <= 5:
-                val *= 1.5
-            matrix[7-rank][file] += val * 0.5 # Inverti rank per matrice numpy visuale
+    # 5. Logica Positiva
+    elif classification in ["Great", "Brilliant"]:
+        reasons.append("Ottima visione! Hai migliorato significativamente la tua posizione.")
+        if board.is_sacrifice(move):
+             reasons.append("Sacrificio tematico corretto.")
 
-    # Aggiungi rumore gaussiano per simulare complessità engine (estetico)
-    noise = np.random.normal(0, 0.1, (8, 8))
-    return matrix + noise
+    # Composizione frase
+    explanation = " ".join(reasons)
+    if not explanation:
+        explanation = "Mossa di sviluppo standard." if classification == "Book" else "Mossa di transizione."
+        
+    return explanation
+
+def detect_psychology(stats, delta, time_spent, classification, move_num, total_moves):
+    """
+    Rileva pattern comportamentali basati su tempi e errori.
+    """
+    # Pattern: Tilt (Errori consecutivi)
+    # Nota: richiederebbe storia, qui usiamo contatori semplici
+    
+    # Pattern: Time Trouble Panic
+    if time_spent and time_spent < 5 and classification in ["Blunder", "Mistake"]:
+        if move_num > 20: # Non in apertura
+            if "Impulsività" not in stats.psych_profile:
+                stats.psych_profile.append("Impulsività")
+    
+    # Pattern: Overthinking (Tanto tempo, mossa brutta)
+    if time_spent and time_spent > 60 and classification in ["Blunder", "Mistake"]:
+        if "Paralisi da Analisi" not in stats.psych_profile:
+            stats.psych_profile.append("Paralisi da Analisi")
+            
+    # Pattern: Crollo nel finale
+    if move_num > (total_moves * 0.8) and classification == "Blunder":
+        if "Stanchedzza Mentale" not in stats.psych_profile:
+            stats.psych_profile.append("Stanchezza Mentale")
 
 # ==============================================================================
-# 5. FUNZIONI DI RENDERING GRAFICO
+# 6. FUNZIONI UI & RENDERING (COMPONENTI)
 # ==============================================================================
 
-def render_board(fen, last_move=None):
-    """
-    Feature: Rendering Board SVG.
-    Converte SVG in Base64 per embedding HTML sicuro.
-    """
+def render_board_svg(fen, last_move=None, arrows=[]):
+    """Renderizza SVG scacchiera con stile Pro."""
     board = chess.Board(fen)
     
-    # Colori scacchiera personalizzati (Tema Blu/Grigio Pro)
-    colors = {'square light': '#f0f1f1', 'square dark': '#8ca2ad'}
-    
-    board_svg = chess.svg.board(
-        board, 
-        lastmove=last_move, 
-        size=450, # Dimensione aumentata leggermente
-        colors=colors
+    # Estrazione caselle mossa per evidenziare
+    lmove = None
+    if last_move and isinstance(last_move, str):
+        try: lmove = chess.Move.from_uci(last_move)
+        except: pass
+    elif isinstance(last_move, chess.Move):
+        lmove = last_move
+
+    svg = chess.svg.board(
+        board,
+        lastmove=lmove,
+        arrows=arrows,
+        size=500,
+        colors={'square light': '#dee3e6', 'square dark': '#8ca2ad'},
+        style="border-radius: 5px;"
     )
-    b64 = base64.b64encode(board_svg.encode('utf-8')).decode("utf-8")
-    return f'<img src="data:image/svg+xml;base64,{b64}" style="width:100%; max-width:450px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);"/>'
+    b64 = base64.b64encode(svg.encode('utf-8')).decode("utf-8")
+    return f'<img src="data:image/svg+xml;base64,{b64}" width="100%" />'
 
-def render_advantage_graph(evals):
+def render_coach_feedback(stats, analysis_results):
+    """Genera la sezione Coaching Avanzato."""
+    st.markdown(f"### {T['coach_section']}")
+    
+    c1, c2 = st.columns([1, 2])
+    
+    with c1:
+        st.image("https://img.icons8.com/color/96/000000/grand-master.png", width=80)
+        st.markdown("**Coach AI**")
+    
+    with c2:
+        # Analisi Psicologica
+        if stats.psych_profile:
+            st.warning(f"⚠️ **Pattern Rilevati:** {', '.join(set(stats.psych_profile))}")
+            if "Impulsività" in stats.psych_profile:
+                st.markdown("> *Consiglio: Usa la regola delle mani. Siediti sulle mani finché non hai verificato la mossa.*")
+            if "Paralisi da Analisi" in stats.psych_profile:
+                st.markdown("> *Consiglio: Se non trovi la mossa perfetta in 3 minuti, gioca una mossa solida.*")
+        else:
+            st.success("🧠 **Mindset:** Solido. Nessun pattern negativo evidente.")
+
+        # Analisi Tecnica Generale
+        if stats.blunders > 2:
+            st.markdown(f"🚫 Hai commesso **{stats.blunders} errori gravi**. Devi lavorare sulla *safety check* (scacchi, prese, minacce) prima di muovere.")
+        elif stats.mistakes > 5:
+            st.markdown("📉 Molte imprecisioni posizionali. Studia piani di mediogioco più semplici.")
+        else:
+            st.markdown("✅ Partita molto pulita tatticamente.")
+
+def get_youtube_recommendation(opening_name, weaknesses):
     """
-    Feature: Grafico Andamento Vantaggio.
-    Utilizza Matplotlib con stile scuro.
+    Sistema di raccomandazione video basato su apertura e debolezze.
+    (Database simulato per robustezza senza API esterne complesse)
     """
-    if not evals: return
+    db = {
+        "Sicilian": "3hI-J3vj7iQ", # GothamChess Sicilian
+        "Queen's Gambit": "0d8fC_4TqC8", # Agadmator QG
+        "Caro-Kann": "r8rT6iE8CAY",
+        "London System": "806r21iN1Cg",
+        "General Tactics": "21L45Qo6f_c", # Tactics video
+        "Endgames": "mC9RJKkCcCc" # Endgame video
+    }
     
-    y = np.array(evals)
-    x = np.arange(len(y))
+    vid_id = db.get("General Tactics")
+    reason = "Miglioramento Tattico Generale"
     
-    fig_graph, ax_graph = plt.subplots(figsize=(10, 3.5))
+    # Logica di selezione
+    if opening_name:
+        for key in db:
+            if key in opening_name:
+                vid_id = db[key]
+                reason = f"Approfondimento Apertura: {key}"
+                break
     
-    # Plotting della linea
-    ax_graph.plot(x, y, color='#4CAF50', linewidth=2.5, label='Eval')
-    
-    # Aree riempite (Verde per vantaggio bianco, Rosso per nero)
-    ax_graph.fill_between(x, y, 0, where=(y >= 0), color='#4CAF50', alpha=0.3, interpolate=True)
-    ax_graph.fill_between(x, y, 0, where=(y < 0), color='#FF5252', alpha=0.3, interpolate=True)
-    
-    # Linea dello zero
-    ax_graph.axhline(0, color='gray', linestyle='--', linewidth=1)
-    
-    # Styling Dark Mode
-    ax_graph.set_facecolor('#0E1117')
-    fig_graph.patch.set_facecolor('#0E1117')
-    
-    # Assi e Testi
-    ax_graph.tick_params(colors='white', which='both')
-    for spine in ax_graph.spines.values():
-        spine.set_edgecolor('#444')
-    
-    ax_graph.set_ylabel("Centipawns (CP)", color='white', fontsize=9)
-    ax_graph.grid(True, color='#333', linestyle=':', alpha=0.5)
-    
-    st.pyplot(fig_graph)
+    if "Endgame" in weaknesses:
+        vid_id = db["Endgames"]
+        reason = "Miglioramento Finali (Tua debolezza rilevata)"
+        
+    return vid_id, reason
 
 # ==============================================================================
-# 6. LAYOUT UI: SIDEBAR & UTENTE
+# 7. MAIN UI LAYOUT
 # ==============================================================================
 
-st.title(T["title"])
+def main():
+    st.title(T["title"])
 
-with st.sidebar:
-    st.header("👤 Profilo Giocatore")
-    
-    # Input utente persistente
-    user = st.text_input("Username Chess.com", "MagnusCarlsen")
-    
-    # Pannello Admin (Feature nascosta)
-    if user.lower() == "admin":
-        st.warning(T["admin_panel"])
-        col_adm1, col_adm2 = st.columns(2)
-        with col_adm1:
-            if st.button("Reset Cache"):
-                st.cache_data.clear()
-                st.cache_resource.clear()
-                st.success("Cache OK")
-        with col_adm2:
-            st.metric("Memory", "Optimum")
-            
-    st.divider()
-    
-    # Feature: Sistema XP e Livello
-    level = st.session_state.xp // 100
-    st.write(f"**{T['xp_level']}**: Level {level}")
-    
-    # Progress bar XP calcolata matematicamente
-    xp_progress = (st.session_state.xp % 100) / 100.0
-    st.progress(min(xp_progress, 1.0))
-    st.caption(f"Total XP: {st.session_state.xp}")
-    
-    st.divider()
-    
-    # Selettore Lingua
-    lang_sel = st.selectbox("Lingua / Language", ["IT", "EN"], index=0 if st.session_state.lang=="IT" else 1)
-    if lang_sel != st.session_state.lang:
-        st.session_state.lang = lang_sel
-        st.rerun() # Ricarica immediata al cambio lingua
-
-    st.divider()
-
-    # Stato Motore
-    engine_path = setup_local_engine()
-    if engine_path and check_engine_health(engine_path):
-        st.success(T["status_ready"])
-    else:
-        st.error(T["status_error"])
-        st.caption("Assicurati che il binario 'stockfish' sia nella root e abbia permessi +x.")
-
-# ==============================================================================
-# 7. LAYOUT UI: COLONNA PRINCIPALE
-# ==============================================================================
-
-col_main, col_side = st.columns([2.2, 1])
-
-with col_main:
-    # Pulsante Analisi Principale
-    if st.button(T["analysis_btn"], use_container_width=True):
-        with st.spinner(T["loading"]):
-            game_data = get_chess_game(user)
-            
-            if game_data and 'pgn' in game_data:
-                st.session_state.game_pgn = game_data['pgn']
-                
-                # Avvio analisi motore se disponibile
-                if engine_path:
-                    st.session_state.game_analysis = analyze_full_game(game_data['pgn'], engine_path)
-                
-                # Assegnazione XP per l'attività
-                st.session_state.xp += 25 
-                st.success(T["game_loaded"])
-            else:
-                st.error(T["game_not_found"])
-
-    # Logica di visualizzazione se c'è una partita caricata
-    if st.session_state.game_pgn:
+    # --- SIDEBAR ---
+    with st.sidebar:
+        st.header("👤 Player Profile")
+        user = st.text_input("Chess.com Username", "Hikaru")
         
-        # 1. Grafico Vantaggio
-        if st.session_state.game_analysis:
-            st.subheader(T["graph_title"])
-            render_advantage_graph(st.session_state.game_analysis)
-
-        # Parsing del PGN per la navigazione
-        pgn_io = io.StringIO(st.session_state.game_pgn)
-        game = chess.pgn.read_game(pgn_io)
+        # XP System Visuals
+        lvl = st.session_state.xp // 100
+        xp_rem = st.session_state.xp % 100
+        st.write(f"**Level {lvl}** | Grandmaster Candidate")
+        st.progress(xp_rem / 100)
         
-        # Metadati partita
-        white_player = game.headers.get("White", "?")
-        black_player = game.headers.get("Black", "?")
-        st.markdown(f"**Match:** 🏳️ {white_player} vs 🏴 {black_player} | **Result:** {game.headers.get('Result')}")
-
-        moves = list(game.mainline_moves())
-        total_moves = len(moves)
-        
-        # 2. Slider Interattivo
-        move_idx = st.select_slider(
-            T["move_slider"], 
-            options=range(total_moves + 1), 
-            value=total_moves
-        )
-        
-        # Ricostruzione board allo stato dello slider
-        board_nav = game.board()
-        last_m = None
-        
-        for i in range(move_idx):
-            last_m = moves[i]
-            board_nav.push(last_m)
-        
-        st.session_state.current_fen = board_nav.fen()
-        
-        # Render Board
-        col_board, col_stats = st.columns([1.5, 1])
-        
-        with col_board:
-            st.markdown(render_board(board_nav.fen(), last_m), unsafe_allow_html=True)
-            
-        with col_stats:
-            # 3. Live Evaluation
-            st.subheader(T["live_eval"])
-            eval_text = "N/A"
-            eval_delta = None
-            
-            if engine_path:
-                results = analizza_posizione(board_nav.fen(), engine_path)
-                if results:
-                    score_obj = results['score'].relative
-                    if score_obj.is_mate():
-                        eval_text = f"Mate in {abs(score_obj.mate())}"
-                    else:
-                        sc = score_obj.score() / 100
-                        eval_text = f"{sc:+2.2f}"
-                        # Colore delta
-                        eval_delta = "White Adv" if sc > 0 else "Black Adv"
-            
-            st.metric("Stockfish Eval", eval_text, delta=eval_delta)
-            
-            # Informazioni extra mossa
-            if last_m:
-                st.info(f"Last Move: **{last_m.uci()}**")
-                piece_moved = board_nav.piece_at(last_m.to_square)
-                if piece_moved:
-                    st.caption(f"Piece: {chess.piece_name(piece_moved.piece_type)}")
-
-        # 4. Pagella Tecnica (Feature Report Card)
-        st.markdown("---")
-        st.subheader(T["report_card"])
-        
-        # Calcolo voti dinamico (simulato ma basato su dati reali se disponibili)
-        evals_arr = st.session_state.game_analysis
-        avg_cp_loss = 0
-        if evals_arr:
-            # Calcolo semplice della perdita media in valore assoluto delle oscillazioni
-            diffs = np.abs(np.diff(evals_arr))
-            avg_cp_loss = np.mean(diffs) * 100
-        
-        # Generazione voti inversa all'errore
-        voto_apertura = max(6, 9.5 - (avg_cp_loss / 80))
-        voto_finale = max(5, 9.0 - (avg_cp_loss / 60))
-        
-        report_data = {
-            "Fase": ["Apertura", "Mediogioco", "Finale", "Tattica"],
-            "Voto (1-10)": [
-                round(voto_apertura, 1), 
-                round(max(4, voto_apertura - 1.2), 1), 
-                round(voto_finale, 1), 
-                round(8.5 if avg_cp_loss < 50 else 6.0, 1)
-            ],
-            "Note": ["Solido", "Complesso", "Preciso", "Opportunista"]
-        }
-        st.table(pd.DataFrame(report_data).set_index("Fase"))
-
-        # 5. Tabella Tattica
-        st.subheader(T["tactics_table"])
-        tattiche_data = {
-            "Categoria": ["Forchetta", "Infilata", "Attacco Scoperto", "Sacrificio"], 
-            "Fatte (✅)": [
-                int(total_moves/10), 
-                int(total_moves/20), 
-                1, 
-                0
-            ], 
-            "Perse (❌)": [1, 0, 0, 1]
-        }
-        st.dataframe(pd.DataFrame(tattiche_data), use_container_width=True)
-
-        # 6. Time Management (Feature)
-        st.subheader(T["time_mgmt"])
-        tm_c1, tm_c2, tm_c3 = st.columns(3)
-        tm_c1.metric("Avg Time/Move", "12.4s", "-0.5s")
-        tm_c2.metric("Total Time", "15:30")
-        tm_c3.warning("⚠️ Critical: Move 14")
-
         st.divider()
-        st.subheader(T["coach_section"])
-        st.info("💡 **Coach Tip**: Ho notato un calo di precisione intorno alla mossa 20. Prova a studiare le strutture pedonali isolate.")
-
-# ==============================================================================
-# 8. LAYOUT UI: COLONNA LATERALE (STATS EXTRA)
-# ==============================================================================
-
-with col_side:
-    st.markdown("<br><br>", unsafe_allow_html=True) # Spaziatura
-    
-    # Feature: ELO Stimato
-    st.subheader(T["elo_est"])
-    
-    # ELO calcolato in base alla precisione (Formula euristica semplice)
-    estimated_elo = 1200
-    if st.session_state.game_analysis:
-        accuracy_bonus = max(0, (300 - (np.std(st.session_state.game_analysis)*100))) * 2
-        estimated_elo += int(accuracy_bonus)
-    
-    st.metric("Performance Rating", f"{estimated_elo}", "+12 vs Avg")
-    
-    st.markdown("---")
-    
-    # Feature: Heatmap Territorio
-    st.subheader(T["heatmap"])
-    
-    if 'current_fen' in st.session_state:
-        board_heatmap = chess.Board(st.session_state.current_fen)
-        heatmap_data = generate_heatmap_data(board_heatmap)
+        st.session_state.lang = st.selectbox("Language", ["IT", "EN"], index=0 if st.session_state.lang=="IT" else 1)
         
-        fig_hm, ax_hm = plt.subplots(figsize=(4, 4))
-        # Palette divergente: Rosso (Nero) <-> Verde (Bianco)
-        sns.heatmap(
-            heatmap_data, 
-            cmap="RdYlGn", 
-            center=0,
-            cbar=False, 
-            ax=ax_hm, 
-            xticklabels=False, 
-            yticklabels=False,
-            square=True,
-            linewidths=0.5,
-            linecolor='#333'
-        )
-        # Sfondo scuro per il plot
-        fig_hm.patch.set_facecolor('#0E1117')
-        st.pyplot(fig_hm)
-    
-    st.caption("Mappa di calore basata su controllo case e densità pezzi.")
+        # Engine Status
+        engine_path = setup_local_engine()
+        if engine_path and check_engine_health(engine_path):
+            st.success(T["status_ready"])
+        else:
+            st.error(T["status_error"])
+            
+        # Admin Tools
+        if user == "admin":
+            st.warning(T["admin_panel"])
+            if st.button("Reset Session"):
+                st.session_state.clear()
+                st.rerun()
 
-# Footer Sidebar
-st.sidebar.divider()
-st.sidebar.markdown(
-    """
-    <div style='text-align: center; color: gray; font-size: 0.8em;'>
-        Sviluppato con Stockfish 13 BMI2.<br>
-        v2.1 Stable Build
-    </div>
-    """, 
-    unsafe_allow_html=True
-)
+    # --- MAIN COLUMN STRUCTURE ---
+    col_main, col_metrics = st.columns([3, 1])
 
+    with col_main:
+        # Action Button
+        analyze_clicked = st.button(T["analysis_btn"], type="primary", use_container_width=True)
+        
+        if analyze_clicked:
+            with st.spinner(T["loading"]):
+                # 1. Fetch Game
+                game_data = get_chess_game(user)
+                if game_data and 'pgn' in game_data:
+                    st.session_state.game_pgn = game_data['pgn']
+                    
+                    # 2. Deep Analysis
+                    results, stats = analyze_game_deep(game_data['pgn'], engine_path, user)
+                    
+                    if results:
+                        st.session_state.game_analysis = results
+                        st.session_state.game_stats = stats
+                        st.session_state.xp += 50
+                        st.success(T["game_loaded"])
+                        time.sleep(1) # UX Pause
+                        st.rerun()
+                else:
+                    st.error(T["game_not_found"])
+
+        # VISUALIZZAZIONE DATI (Se analisi esiste)
+        if st.session_state.game_analysis:
+            results = st.session_state.game_analysis
+            stats = st.session_state.game_stats # Recupero statistiche
+            
+            # Parsing base per info partita
+            pgn_io = io.StringIO(st.session_state.game_pgn)
+            game_ref = chess.pgn.read_game(pgn_io)
+            opening_name = game_ref.headers.get("Opening", "Unknown Opening")
+
+            # --- TABS PER ORGANIZZAZIONE PULITA ---
+            tab_overview, tab_replay, tab_coach, tab_training = st.tabs([
+                "📊 Overview & Report", 
+                "♟️ Replay & Narrativa", 
+                "👨‍🏫 Coach & Video",
+                "🧩 Puzzle & Training"
+            ])
+
+            # TAB 1: OVERVIEW
+            with tab_overview:
+                # Grafico Vantaggio
+                st.subheader(T["graph_title"])
+                evals = [m.score for m in results]
+                
+                fig, ax = plt.subplots(figsize=(10, 3))
+                ax.plot(evals, color='#4CAF50', linewidth=2)
+                ax.fill_between(range(len(evals)), evals, 0, where=(np.array(evals)>0), color='#4CAF50', alpha=0.3)
+                ax.fill_between(range(len(evals)), evals, 0, where=(np.array(evals)<0), color='#FF5252', alpha=0.3)
+                ax.axhline(0, color='gray', linestyle='--')
+                ax.set_facecolor(CONSTANTS["THEME"]["bg"])
+                fig.patch.set_facecolor(CONSTANTS["THEME"]["bg"])
+                ax.tick_params(colors='white')
+                st.pyplot(fig)
+
+                # Report Card Reale
+                st.subheader(T["report_card"])
+                c1, c2, c3, c4 = st.columns(4)
+                
+                def get_grade(acc):
+                    if acc >= 90: return "A+", "green"
+                    if acc >= 80: return "A", "green"
+                    if acc >= 70: return "B", "blue"
+                    if acc >= 50: return "C", "orange"
+                    return "D", "red"
+
+                with c1: 
+                    gr, col = get_grade(stats.openings_accuracy)
+                    st.metric("Opening", f"{gr}", f"{stats.openings_accuracy:.1f}%")
+                with c2:
+                    gr, col = get_grade(stats.middlegame_accuracy)
+                    st.metric("Middlegame", f"{gr}", f"{stats.middlegame_accuracy:.1f}%")
+                with c3:
+                    gr, col = get_grade(stats.endgame_accuracy)
+                    st.metric("Endgame", f"{gr}", f"{stats.endgame_accuracy:.1f}%")
+                with c4:
+                    st.metric("Blunders", f"{stats.blunders}", "Critico" if stats.blunders > 1 else "Ok", delta_color="inverse")
+
+                # Tabella Tattica
+                st.subheader(T["tactics_table"])
+                tactic_df = pd.DataFrame({
+                    "Tipo": ["Brilliant", "Great", "Best/Good", "Inaccuracy", "Mistake", "Blunder"],
+                    "Conteggio": [
+                        stats.brilliant_moves,
+                        sum(1 for x in results if x.classification == "Great"),
+                        sum(1 for x in results if x.classification in ["Best", "Good", "Book"]),
+                        stats.inaccuracies,
+                        stats.mistakes,
+                        stats.blunders
+                    ]
+                })
+                st.dataframe(tactic_df, use_container_width=True, hide_index=True)
+
+            # TAB 2: REPLAY NARRATIVO
+            with tab_replay:
+                move_idx = st.select_slider(
+                    T["move_slider"], 
+                    options=range(len(results)), 
+                    value=0,
+                    key="replay_slider"
+                )
+                
+                current_data = results[move_idx]
+                
+                col_r1, col_r2 = st.columns([1.5, 1])
+                with col_r1:
+                    st.markdown(render_board_svg(current_data.fen), unsafe_allow_html=True)
+                
+                with col_r2:
+                    st.markdown(f"### Mossa {math.ceil((move_idx+1)/2)}")
+                    st.markdown(f"**Mossa Giocata:** `{current_data.move_san}`")
+                    
+                    # Badge Classificazione
+                    color_map = {"Blunder": "red", "Mistake": "orange", "Good": "green", "Brilliant": "teal", "Book": "blue"}
+                    badge_col = color_map.get(current_data.classification, "grey")
+                    st.markdown(f":{badge_col}[**{current_data.classification}**]")
+                    
+                    st.metric("Valutazione", f"{current_data.score:.2f}")
+                    
+                    # Analisi Narrativa ("Perché")
+                    st.markdown(f"#### {T['why_move']}")
+                    st.markdown(f"""
+                    <div class="narrative-box">
+                        {current_data.narrative if current_data.narrative else "Analisi standard della posizione."}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    if current_data.time_spent:
+                        st.caption(f"⏱️ Tempo riflessione: {int(current_data.time_spent)}s")
+
+            # TAB 3: COACH & VIDEO
+            with tab_coach:
+                render_coach_feedback(stats, results)
+                
+                st.divider()
+                st.subheader(T["video_rec"])
+                
+                # Logica selezione video
+                weaknesses = []
+                if stats.endgame_accuracy < 60: weaknesses.append("Endgame")
+                vid_id, reason = get_youtube_recommendation(opening_name, weaknesses)
+                
+                c_vid1, c_vid2 = st.columns([1, 1])
+                with c_vid1:
+                    st.markdown(f"**Consigliato per:** *{reason}*")
+                    st.image(f"https://img.youtube.com/vi/{vid_id}/hqdefault.jpg", width=300)
+                    st.markdown(f"[▶️ Guarda Video su YouTube](https://www.youtube.com/watch?v={vid_id})")
+                with c_vid2:
+                    st.markdown("### Piano di Studio")
+                    st.markdown(f"""
+                    1. Rivedi l'apertura **{opening_name}**.
+                    2. Risolvi 10 puzzle sul tema "{'Finali' if 'Endgame' in weaknesses else 'Tattica'}".
+                    3. Analizza i tuoi {stats.blunders} Blunder nella tab Replay.
+                    """)
+
+            # TAB 4: PUZZLES (Generati dagli errori)
+            with tab_training:
+                st.subheader(T["puzzles"])
+                
+                # Filtra posizioni dove l'utente ha fatto Mistake/Blunder
+                puzzle_candidates = [r for r in results if r.classification in ["Blunder", "Mistake"]]
+                
+                if not puzzle_candidates:
+                    st.success("🎉 Incredibile! Nessun errore grave trovato per generare puzzle.")
+                else:
+                    st.info(f"Abbiamo generato {len(puzzle_candidates)} puzzle basati sui tuoi errori in questa partita.")
+                    
+                    # Puzzle Slider
+                    puz_idx = st.number_input("Seleziona Puzzle", 1, len(puzzle_candidates), 1) - 1
+                    puz_data = puzzle_candidates[puz_idx]
+                    
+                    # Per mostrare il puzzle, dobbiamo mostrare la posizione PRIMA dell'errore
+                    # Recuperiamo l'indice originale
+                    orig_idx = results.index(puz_data)
+                    prev_fen = results[orig_idx-1].fen if orig_idx > 0 else chess.STARTING_FEN
+                    
+                    col_p1, col_p2 = st.columns(2)
+                    with col_p1:
+                        st.markdown("**Trova la mossa migliore (che ti sei perso):**")
+                        st.markdown(render_board_svg(prev_fen), unsafe_allow_html=True)
+                    
+                    with col_p2:
+                        with st.expander("👁️ Mostra Soluzione"):
+                            st.write("La mossa che avresti dovuto giocare (o evitare l'errore) dipende dal calcolo del motore.")
+                            st.write("In questa posizione, il tuo errore è stato: " + puz_data.move_san)
+                            st.warning("Analizza la posizione con il motore locale per trovare la continuazione vincente!")
+
+    # --- SIDEBAR METRICS (Aggiornate) ---
+    with col_metrics:
+        if st.session_state.game_analysis:
+            st.markdown("### 📊 Live Stats")
+            
+            # Heatmap Territorio (Aggiornata con FEN corrente slider)
+            st.subheader(T["heatmap"])
+            if 'game_analysis' in st.session_state:
+                current_r = st.session_state.game_analysis[st.session_state.get("replay_slider", 0)]
+                fen_hm = current_r.fen
+                
+                board_hm = chess.Board(fen_hm)
+                
+                # Generazione Heatmap Reale
+                matrix = np.zeros((8, 8))
+                for sq in chess.SQUARES:
+                    piece = board_hm.piece_at(sq)
+                    if piece:
+                        val = 1 if piece.color == chess.WHITE else -1
+                        # Peso centrale
+                        r, f = chess.square_rank(sq), chess.square_file(sq)
+                        if 2 <= r <= 5 and 2 <= f <= 5: val *= 1.2
+                        matrix[7-r][f] = val
+                
+                fig_hm, ax_hm = plt.subplots(figsize=(4, 4))
+                sns.heatmap(matrix, cmap="RdYlGn", center=0, cbar=False, ax=ax_hm, xticklabels=False, yticklabels=False, square=True)
+                fig_hm.patch.set_facecolor(CONSTANTS["THEME"]["bg"])
+                st.pyplot(fig_hm)
+
+            # Time Management
+            st.subheader(T["time_mgmt"])
+            if st.session_state.game_stats:
+                st.metric("Avg Time", f"{st.session_state.game_stats.avg_time_per_move:.1f}s")
+                st.metric("In Time Trouble", f"{st.session_state.game_stats.time_trouble_count} moves")
+
+    # FOOTER
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(
+        f"<div style='text-align:center; color:#666; font-size:12px;'>{CONSTANTS['APP_TITLE']} v{CONSTANTS['VERSION']}<br>Powered by Stockfish & Python</div>", 
+        unsafe_allow_html=True
+    )
+
+if __name__ == "__main__":
+    main()
