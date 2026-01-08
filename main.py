@@ -58,48 +58,46 @@ def setup_stockfish():
         if not os.path.exists(engine_dir):
             os.makedirs(engine_dir)
         
-        # URL specifico per la versione 16.1 - Molto più affidabile del link "latest"
+        # URL DIRETTO ALLA RELEASE 16.1 (Linux x64 AVX2)
         url = "https://github.com/official-stockfish/Stockfish/releases/download/sf_16.1/stockfish-ubuntu-x86-64-avx2.tar.gz"
         
         try:
             file_tmp = "temp_stockfish.tar.gz"
             
-            # Configuriamo il downloader per apparire come un browser (evita l'errore 404/403)
+            # User-Agent per evitare blocchi (emuliamo un browser)
             opener = urllib.request.build_opener()
             opener.addheaders = [('User-agent', 'Mozilla/5.0')]
             urllib.request.install_opener(opener)
             
-            # Scarichiamo il file
+            # Scarichiamo
             urllib.request.urlretrieve(url, file_tmp)
             
-            # Estraiamo l'archivio
+            # Estraiamo
             with tarfile.open(file_tmp, "r:gz") as tar:
                 tar.extractall(path=engine_dir)
             
-            # Cerchiamo il file binario dentro le cartelle estratte
+            # Cerchiamo il binario ed eseguiamo la ridenominazione
             found = False
             for root, dirs, files in os.walk(engine_dir):
                 for file in files:
-                    # Cerchiamo il file che inizia per 'stockfish-' e non è l'archivio stesso
-                    if "stockfish" in file and not file.endswith(".gz"):
+                    # Cerchiamo il file eseguibile (solitamente non ha estensione o finisce per .bin)
+                    if "stockfish" in file and not file.endswith(".gz") and not file.endswith(".txt"):
                         current_path = os.path.join(root, file)
-                        # Spostiamo e rinominiamo nel percorso finale
                         os.replace(current_path, engine_path)
                         found = True
                         break
                 if found: break
             
-            # Diamo i permessi di esecuzione necessari per Linux
             if os.path.exists(engine_path):
                 os.chmod(engine_path, os.stat(engine_path).st_mode | stat.S_IEXEC)
             
-            # Pulizia file temporaneo
             if os.path.exists(file_tmp):
                 os.remove(file_tmp)
                 
             return engine_path
         except Exception as e:
-            st.error(f"Errore download motore: {e}")
+            st.error(f"⚠️ Errore critico nel download: {e}")
+            st.info("💡 Prova a riavviare l'app tra un minuto o controlla la tua connessione.")
             return None
     return engine_path
 
