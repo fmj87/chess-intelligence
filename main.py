@@ -52,34 +52,51 @@ st.set_page_config(page_title="Chess Intelligence Pro", layout="wide")
 @st.cache_resource
 def setup_stockfish():
     engine_dir = "stockfish_engine"
-    # Nome del file finale che useremo nel codice
     engine_path = os.path.abspath(os.path.join(engine_dir, "stockfish_app"))
     
     if not os.path.exists(engine_path):
         if not os.path.exists(engine_dir):
             os.makedirs(engine_dir)
         
-        # URL ufficiale Stockfish Linux
-        url = "https://github.com/official-stockfish/Stockfish/releases/latest/download/stockfish-ubuntu-x86-64-avx2.tar.gz"
+        # URL specifico per la versione 16.1 - Molto più affidabile del link "latest"
+        url = "https://github.com/official-stockfish/Stockfish/releases/download/sf_16.1/stockfish-ubuntu-x86-64-avx2.tar.gz"
         
         try:
             file_tmp = "temp_stockfish.tar.gz"
+            
+            # Configuriamo il downloader per apparire come un browser (evita l'errore 404/403)
+            opener = urllib.request.build_opener()
+            opener.addheaders = [('User-agent', 'Mozilla/5.0')]
+            urllib.request.install_opener(opener)
+            
+            # Scarichiamo il file
             urllib.request.urlretrieve(url, file_tmp)
             
+            # Estraiamo l'archivio
             with tarfile.open(file_tmp, "r:gz") as tar:
                 tar.extractall(path=engine_dir)
             
-            # Cerca il binario estratto e nominalo 'stockfish_app'
+            # Cerchiamo il file binario dentro le cartelle estratte
+            found = False
             for root, dirs, files in os.walk(engine_dir):
                 for file in files:
-                    if "stockfish" in file and "tar.gz" not in file:
+                    # Cerchiamo il file che inizia per 'stockfish-' e non è l'archivio stesso
+                    if "stockfish" in file and not file.endswith(".gz"):
                         current_path = os.path.join(root, file)
-                        os.rename(current_path, engine_path)
+                        # Spostiamo e rinominiamo nel percorso finale
+                        os.replace(current_path, engine_path)
+                        found = True
                         break
+                if found: break
             
-            # Permessi di esecuzione Linux
-            os.chmod(engine_path, os.stat(engine_path).st_mode | stat.S_IEXEC)
-            os.remove(file_tmp)
+            # Diamo i permessi di esecuzione necessari per Linux
+            if os.path.exists(engine_path):
+                os.chmod(engine_path, os.stat(engine_path).st_mode | stat.S_IEXEC)
+            
+            # Pulizia file temporaneo
+            if os.path.exists(file_tmp):
+                os.remove(file_tmp)
+                
             return engine_path
         except Exception as e:
             st.error(f"Errore download motore: {e}")
