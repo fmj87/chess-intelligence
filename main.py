@@ -505,7 +505,7 @@ class ChessAnalyzer:
         # Il pezzo mosso attacca due pezzi maggiori (o uguali) simultaneamente?
         attacks_bb = board_after.attacks(to_sq)
         # Filtriamo solo i pezzi nemici
-        enemy_pieces = board_after.occupied_co[opponent] & attacks_bb
+        enemy_pieces = int(board_after.occupied_co[opponent]) & int(attacks_bb)
         
         attacked_valuable_count = 0
         attacked_squares = list(chess.SquareSet(enemy_pieces))
