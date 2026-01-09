@@ -526,13 +526,12 @@ class ChessAnalyzer:
         if king_sq is not None:
             if board_after.is_check():
                 # Feature: SCACCO DI SCOPERTA
-                # Se c'è scacco ma NON viene dal pezzo appena mosso, è una scoperta
                 if not board_after.attacks(to_sq).contains(king_sq):
                     tactics.append("Attacco di Scoperta 🎁")
                 
                 # Feature: INFILATA (Skewer) al Re
-                # Se il Re è sotto attacco e "dietro" c'è un altro pezzo nemico sulla stessa linea
                 beyond_ray = chess.ray(to_sq, king_sq) ^ chess.ray(king_sq, to_sq)
+                # FIX DEFINITIVO: int() su entrambi i termini del raggio e dell'occupazione
                 if int(beyond_ray) & int(board_after.occupied_co[opponent]):
                     tactics.append("Infilata 🏹")
             else:
