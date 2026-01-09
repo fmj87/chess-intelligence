@@ -477,15 +477,14 @@ class ChessAnalyzer:
         
         return min(100.0, max(0.0, accuracy))
 
-    # --------------------------------------------------------------------------
+# --------------------------------------------------------------------------
     # 2. DEEP TACTICAL SCANNER (BITBOARD ANALYSIS)
     # --------------------------------------------------------------------------
 
     def detect_tactical_patterns(self, board: chess.Board, move: chess.Move) -> List[str]:
         """
         Analizza la mossa usando i bitboards per identificare pattern tattici.
-        Restituisce una lista di tag (es. "Forchetta", "Inchiodatura").
-        Deve essere veloce (non usa il motore, solo logica posizionale).
+        Mantiene TUTTE le tue feature originali e corregge i bug dei tipi.
         """
         tactics = []
         
@@ -502,9 +501,8 @@ class ChessAnalyzer:
         if not piece: return []
 
         # 1. FORCHETTA (Fork)
-        # Il pezzo mosso attacca due pezzi maggiori (o uguali) simultaneamente?
         attacks_bb = board_after.attacks(to_sq)
-        # Filtriamo solo i pezzi nemici
+        # Fix: Conversione esplicita in int per evitare l'errore SquareSet
         enemy_pieces = int(board_after.occupied_co[opponent]) & int(attacks_bb)
         
         attacked_valuable_count = 0
@@ -512,41 +510,46 @@ class ChessAnalyzer:
         
         for sq in attacked_squares:
             target = board_after.piece_at(sq)
-            if target and self.PIECE_VALUES.get(target.piece_type, 0) >= self.PIECE_VALUES.get(piece.piece_type, 0):
-                # Escludiamo pedoni che attaccano pedoni (scambi normali)
-                if not (piece.piece_type == chess.PAWN and target.piece_type == chess.PAWN):
-                    attacked_valuable_count += 1
+            if target:
+                # Se attacchiamo il Re o un pezzo di valore >= al nostro
+                if target.piece_type == chess.KING or \
+                   self.PIECE_VALUES.get(target.piece_type, 0) >= self.PIECE_VALUES.get(piece.piece_type, 0):
+                    # Escludiamo scambi normali di pedoni
+                    if not (piece.piece_type == chess.PAWN and target.piece_type == chess.PAWN):
+                        attacked_valuable_count += 1
         
         if attacked_valuable_count >= 2:
             tactics.append("Forchetta 🍴")
 
         # 2. INCHIODATURA (Pin) & INFILATA (Skewer)
-        # Controlliamo se la mossa ha creato raggi x sul Re o sulla Donna
-        # (Semplificato: controlliamo se il pezzo mosso attacca un pezzo che è allineato col Re)
         king_sq = board_after.king(opponent)
         if king_sq is not None:
-            # Se diamo scacco, controlliamo se è una infilata o attacco doppio
             if board_after.is_check():
-                # Logica scacco di scoperta o infilata
-                pass
+                # Feature: SCACCO DI SCOPERTA
+                # Se c'è scacco ma NON viene dal pezzo appena mosso, è una scoperta
+                if not board_after.attacks(to_sq).contains(king_sq):
+                    tactics.append("Attacco di Scoperta 🎁")
+                
+                # Feature: INFILATA (Skewer) al Re
+                # Se il Re è sotto attacco e "dietro" c'è un altro pezzo nemico sulla stessa linea
+                beyond_ray = chess.ray(to_sq, king_sq) ^ chess.ray(king_sq, to_sq)
+                if int(beyond_ray) & int(board_after.occupied_co[opponent]):
+                    tactics.append("Infilata 🏹")
             else:
-                # Controlliamo se abbiamo inchiodato qualcosa
-                # Un pezzo è inchiodato se muovendolo esporrebbe il Re
-                # Iteriamo sui pezzi nemici attaccati dal nostro pezzo
+                # Feature: INCHIODATURA (Pin)
                 for sq in attacked_squares:
-                    # Simuliamo rimozione del pezzo nemico attaccato
                     if board_after.is_pinned(opponent, sq):
-                         tactics.append("Inchiodatura 📍")
-                         break
+                        tactics.append("Inchiodatura 📍")
+                        break
 
         # 3. RIMOZIONE DEL DIFENSORE
-        # Questo è difficile senza motore, ma possiamo vedere se abbiamo catturato
-        # un pezzo che difendeva un altro pezzo ora sotto attacco.
+        # Se catturiamo un pezzo, controlliamo se ora altri pezzi sono indifesi
         if board.is_capture(move):
-            # Controlla se ci sono altri pezzi nemici attaccati che non sono più difesi
-            pass # Implementazione complessa, omessa per brevità e performance
+            # Logica base: se abbiamo rimosso un pezzo che proteggeva una casa ora attaccata
+            # Rimane una feature complessa, ma il tag può essere attivato dal motore se la precisione cala
+            pass 
 
-        return tactics
+        return list(set(tactics)) # Rimuove eventuali tag duplicati
 
     # --------------------------------------------------------------------------
     # 3. STRUCTURAL & POSITIONAL ANALYSIS
