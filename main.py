@@ -1025,24 +1025,50 @@ def main():
             kpi4.metric("Tempo/Mossa", f"{int(stats.avg_time)}s")
             
             st.divider()
-            # Grafico Vantaggio Ottimizzato
-            evals = [r.score if isinstance(r.score, (int, float)) else 0 for r in results]
-            fig, ax = plt.subplots(figsize=(12, 3))
-            ax.plot(evals, color='#4CAF50', linewidth=2)
-            ax.fill_between(range(len(evals)), evals, 0, where=(np.array(evals)>0), color='#4CAF50', alpha=0.2)
-            ax.fill_between(range(len(evals)), evals, 0, where=(np.array(evals)<0), color='#FF5252', alpha=0.2)
-            ax.axhline(0, color='#555', linestyle='--')
-            ax.set_facecolor("#0e1117")
-            fig.patch.set_facecolor("#0e1117")
-            ax.tick_params(colors='white')
-            st.pyplot(fig)
             
-            # Breakdown Fasi
-            st.subheader("Performance per Fase")
-            ph_col1, ph_col2, ph_col3 = st.columns(3)
-            ph_col1.metric("Apertura", f"{stats.phases['opening']:.1f}%")
-            ph_col2.metric("Mediogioco", f"{stats.phases['middlegame']:.1f}%")
-            ph_col3.metric("Finale", f"{stats.phases['endgame']:.1f}%")
+            # 1. Grafico Vantaggio (Centipedoni)
+            st.subheader("Evoluzione del Vantaggio")
+            evals = [r.score if isinstance(r.score, (int, float)) else 0 for r in results]
+            fig_eval, ax_eval = plt.subplots(figsize=(12, 3))
+            ax_eval.plot(evals, color='#4CAF50', linewidth=2)
+            ax_eval.fill_between(range(len(evals)), evals, 0, where=(np.array(evals)>0), color='#4CAF50', alpha=0.2)
+            ax_eval.fill_between(range(len(evals)), evals, 0, where=(np.array(evals)<0), color='#FF5252', alpha=0.2)
+            ax_eval.axhline(0, color='#555', linestyle='--')
+            ax_eval.set_facecolor("#0e1117")
+            fig_eval.patch.set_facecolor("#0e1117")
+            ax_eval.tick_params(colors='white')
+            st.pyplot(fig_eval)
+
+            # 2. Grafico Win Probability (Il "vero" grafico di Chess.com)
+            st.subheader("Probabilità di Vittoria (%)")
+            probs = stats.win_probs
+            fig_wp, ax_wp = plt.subplots(figsize=(12, 2))
+            # Creiamo un grafico stacked: Bianco vs Nero
+            ax_wp.stackplot(range(len(probs)), [probs, [100-x for x in probs]], colors=['#4CAF50', '#FF5252'], alpha=0.4)
+            ax_wp.set_ylim(0, 100)
+            ax_wp.set_facecolor("#0e1117")
+            fig_wp.patch.set_facecolor("#0e1117")
+            ax_wp.set_axis_off() # Nascondiamo gli assi per un look pulito
+            st.pyplot(fig_wp)
+
+            # 3. Tabella delle Tattiche Rilevate
+            st.divider()
+            st.subheader("🎯 Temi Tattici Rilevati")
+            tactic_list = []
+            for r in results:
+                # Se la narrativa contiene parole chiave come "Tattica", "Inchiodatura", ecc.
+                if "Tattica:" in r.narrative or "Note:" in r.narrative:
+                    tactic_list.append({
+                        "Mossa": r.move_no,
+                        "Giocatore": "Bianco" if r.move_no % 2 != 0 else "Nero",
+                        "Mossa SAN": r.move_san,
+                        "Dettaglio": r.narrative
+                    })
+            
+            if tactic_list:
+                st.table(pd.DataFrame(tactic_list))
+            else:
+                st.info("Nessuna tattica complessa rilevata. Partita posizionale.")
 
         with tab_replay:
             col_board, col_narrative = st.columns([1.5, 1])
@@ -1063,17 +1089,20 @@ def main():
                 )
                 st.image(f"data:image/svg+xml;base64,{base64.b64encode(board_svg.encode()).decode()}", use_container_width=True)
                     
-            with col_narrative:
+				
+			with col_narrative:
                 st.markdown(f"### Mossa {current.move_no} ({current.move_san})")
                 
                 cls_lower = current.classification.lower()
                 badge_map = {
                     "brilliant": "badge-brilliant",
+                    "great": "badge-brilliant",
                     "blunder": "badge-blunder",
                     "mistake": "badge-mistake",
                     "best": "badge-accent",
                     "excellent": "badge-accent",
-                    "good": "badge-good"
+                    "good": "badge-good",
+                    "book": "badge-good"
                 }
                 badge_class = badge_map.get(cls_lower, "badge-good")
                 st.markdown(f'<span class="badge {badge_class}">{current.classification.upper()}</span>', unsafe_allow_html=True)
@@ -1082,6 +1111,7 @@ def main():
                 m1.metric("Engine Score", f"{current.score}")
                 m2.metric("Win Chance", f"{current.win_prob:.1f}%")
                 
+                # Box Narrativa Principale
                 st.markdown(f"""
                 <div class="narrative-box">
                     <strong>♟️ Analisi Strategica:</strong><br>
@@ -1089,6 +1119,33 @@ def main():
                 </div>
                 """, unsafe_allow_html=True)
 
+                # --- TABELLA TATTICA DINAMICA ---
+                # Mostra i dettagli tecnici solo se c'è qualcosa di rilevante da segnalare
+                st.markdown("---")
+                st.markdown("##### 📊 Dettagli Tecnici")
+                
+                # Estrazione pulita dei temi dalla narrativa
+                temi_rilevati = "Standard"
+                if "Tattica:" in current.narrative:
+                    temi_rilevati = current.narrative.split("Tattica:")[1].split(".")[0].strip()
+                elif "Note:" in current.narrative:
+                    temi_rilevati = current.narrative.split("Note:")[1].split(".")[0].strip()
+
+                # Creazione tabella per la mossa corrente
+                df_mossa = pd.DataFrame({
+                    "Parametro": ["Tema", "Tempo Speso", "Miglior Mossa"],
+                    "Valore": [
+                        temi_rilevati, 
+                        f"{current.time_spent:.1f}s", 
+                        current.best_move
+                    ]
+                })
+                st.table(df_mossa)
+                
+                # Avviso visivo immediato per Blunder/Mistake
+                if current.classification in ["Blunder", "Mistake"]:
+                    st.error(f"⚠️ La mossa corretta era: **{current.best_move}**")
+					
         with tab_coach:
             st.markdown("### 👨‍🏫 Profilo Psicologico")
             if stats.psych_profile:
