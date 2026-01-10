@@ -184,10 +184,10 @@ class MoveAnalysis:
     def __init__(self, move_no, move_san, fen, score, classification, best_move, time_spent, narrative, fen_before):
         self.move_no = move_no
         self.move_san = move_san
-        self.fen = fen
-        self.fen_before = fen_before # Cruciale per i puzzle
+        self.fen_after = fen        # Cambiato da self.fen a self.fen_after
+        self.fen_before = fen_before 
         self.score = score
-        self.classification = classification # Book, Best, Good, Inaccuracy, Mistake, Blunder, Brilliant
+        self.classification = classification 
         self.best_move = best_move
         self.time_spent = time_spent
         self.narrative = narrative
