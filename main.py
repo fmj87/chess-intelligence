@@ -573,12 +573,12 @@ class ChessAnalyzer:
             rank = chess.square_rank(sq)
             
             # Pedone Isolato (Nessun pedone amico nelle colonne adiacenti)
-            adj_files = {file - 1, file + 1} & {0,1,2,3,4,5,6,7}
+            adj_files = {f for f in [file - 1, file + 1] if 0 <= f <= 7}
             is_isolated = True
             for af in adj_files:
                 # Maschera colonna
                 file_mask = chess.BB_FILES[af]
-                if file_mask & my_pawns:
+                if int(file_mask) & int(my_pawns):
                     is_isolated = False
                     break
             
@@ -592,7 +592,7 @@ class ChessAnalyzer:
             file = chess.square_file(sq)
             file_mask = chess.BB_FILES[file]
             # Colonna aperta se nessun pedone (nè bianco nè nero)
-            if not ((white_pawns | black_pawns) & file_mask):
+            if not (int(white_pawns | black_pawns) & int(file_mask)):
                 tags.append("Torre su Colonna Aperta")
                 break
 
