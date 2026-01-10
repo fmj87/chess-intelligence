@@ -968,7 +968,7 @@ def main():
     col_action, col_status = st.columns([3, 1])
     
     with col_action:
-        analyze_btn = st.button("🚀 AVVIA ANALISI GRANDMASTER", type="primary", use_container_width=True)
+        analyze_btn = st.button("🚀 AVVIA ANALISI GRANDMASTER", type="primary", width="stretch")
     
     if analyze_btn:
         pgn_to_analyze = None
@@ -1016,7 +1016,7 @@ def main():
             st.markdown(f"### 🏳️ {stats.white_player} vs 🏴 {stats.black_player}")
             st.caption(f"Apertura: {stats.opening}")
             
-            # KPI Row
+            # 1. KPI Principali (Metriche in alto)
             kpi1, kpi2, kpi3, kpi4 = st.columns(4)
             avg_acc = np.mean(stats.accuracies) if stats.accuracies else 0
             kpi1.metric("Precisione Globale", f"{avg_acc:.1f}%")
@@ -1025,8 +1025,28 @@ def main():
             kpi4.metric("Tempo/Mossa", f"{int(stats.avg_time)}s")
             
             st.divider()
-            
-            # 1. Grafico Vantaggio (Centipedoni)
+
+            # 2. TABELLA RIASSUNTIVA (Quella che volevi vedere)
+            st.subheader("📊 Riepilogo Qualità Mosse")
+            c = stats.counts
+            df_counts = pd.DataFrame({
+                "Classificazione": ["Brilliant", "Great", "Best", "Excellent", "Good", "Book", "Inaccuracy", "Mistake", "Blunder"],
+                "Conteggio": [c['brilliant'], c['great'], c['best'], c['excellent'], c['good'], c['book'], c['inaccuracy'], c['mistake'], c['blunder']]
+            })
+
+            def color_rows(row):
+                cls = row['Classificazione']
+                if cls == "Blunder": return ['background-color: #FF5252; color: white'] * 2
+                if cls == "Mistake": return ['background-color: #FFA726; color: white'] * 2
+                if cls == "Brilliant": return ['background-color: #00BCD4; color: white'] * 2
+                if cls == "Best": return ['background-color: #4CAF50; color: white'] * 2
+                return [''] * 2
+
+            st.table(df_counts.style.apply(color_rows, axis=1))
+
+            st.divider()
+
+            # 3. GRAFICI (Vantaggio e Win Probability)
             st.subheader("Evoluzione del Vantaggio")
             evals = [r.score if isinstance(r.score, (int, float)) else 0 for r in results]
             fig_eval, ax_eval = plt.subplots(figsize=(12, 3))
@@ -1039,37 +1059,52 @@ def main():
             ax_eval.tick_params(colors='white')
             st.pyplot(fig_eval)
 
-            # 2. Grafico Win Probability (Il "vero" grafico di Chess.com)
             st.subheader("Probabilità di Vittoria (%)")
             probs = stats.win_probs
-            fig_wp, ax_wp = plt.subplots(figsize=(12, 2))
-            # Creiamo un grafico stacked: Bianco vs Nero
+            fig_wp, ax_wp = plt.subplots(figsize=(12, 1.5))
             ax_wp.stackplot(range(len(probs)), [probs, [100-x for x in probs]], colors=['#4CAF50', '#FF5252'], alpha=0.4)
             ax_wp.set_ylim(0, 100)
             ax_wp.set_facecolor("#0e1117")
             fig_wp.patch.set_facecolor("#0e1117")
-            ax_wp.set_axis_off() # Nascondiamo gli assi per un look pulito
+            ax_wp.set_axis_off()
             st.pyplot(fig_wp)
 
-            # 3. Tabella delle Tattiche Rilevate
+            # 4. TABELLA TATTICHE (Tattiche perse e temi rilevati)
             st.divider()
             st.subheader("🎯 Temi Tattici Rilevati")
             tactic_list = []
             for r in results:
-                # Se la narrativa contiene parole chiave come "Tattica", "Inchiodatura", ecc.
                 if "Tattica:" in r.narrative or "Note:" in r.narrative:
                     tactic_list.append({
                         "Mossa": r.move_no,
                         "Giocatore": "Bianco" if r.move_no % 2 != 0 else "Nero",
-                        "Mossa SAN": r.move_san,
-                        "Dettaglio": r.narrative
+                        "SAN": r.move_san,
+                        "Dettaglio": r.narrative.replace("Tattica:", "🎯").replace("Note:", "📝")
                     })
             
             if tactic_list:
                 st.table(pd.DataFrame(tactic_list))
             else:
-                st.info("Nessuna tattica complessa rilevata. Partita posizionale.")
-
+                st.info("Nessuna tattica complessa rilevata dal motore.")
+			# --- FEATURE: ANALISI DEBOLEZZE (Coach Advice) ---
+            st.divider()
+            st.subheader("👨‍🏫 Il Verdetto del Coach")
+            
+            weakness = False
+            if stats.counts['blunder'] > 2:
+                st.error("⚠️ **Punto Debole: Tattica**. Hai commesso troppi errori gravi. Ti consiglio di fare più puzzle sulla difesa.")
+                weakness = True
+            
+            # Controllo tempo (se i tempi sono stati estratti correttamente)
+            times_spent = [r.time_spent for r in results if r.time_spent is not None]
+            if times_spent and max(times_spent) > stats.avg_time * 3:
+                st.warning("⚠️ **Punto Debole: Time Management**. Hai speso troppo tempo su singole mosse critiche.")
+                weakness = True
+                
+            if not weakness:
+                st.balloons()
+                st.success("✨ **Partita solida!** Non hai mostrato debolezze evidenti. Continua così!")
+				
         with tab_replay:
             col_board, col_narrative = st.columns([1.5, 1])
             
@@ -1087,10 +1122,10 @@ def main():
                     orientation=flip_board,
                     size=450
                 )
-                st.image(f"data:image/svg+xml;base64,{base64.b64encode(board_svg.encode()).decode()}", use_container_width=True)
+                st.image(f"data:image/svg+xml;base64,{base64.b64encode(board_svg.encode()).decode()}", width="stretch")
                     
 				
-			with col_narrative:
+		with col_narrative:
                 st.markdown(f"### Mossa {current.move_no} ({current.move_san})")
                 
                 cls_lower = current.classification.lower()
