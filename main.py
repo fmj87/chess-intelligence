@@ -1086,7 +1086,7 @@ def main():
                 st.table(pd.DataFrame(tactic_list))
             else:
                 st.info("Nessuna tattica complessa rilevata dal motore.")
-			# --- FEATURE: ANALISI DEBOLEZZE (Coach Advice) ---
+             # --- FEATURE: ANALISI DEBOLEZZE (Coach Advice) ---
             st.divider()
             st.subheader("👨‍🏫 Il Verdetto del Coach")
             
@@ -1104,7 +1104,7 @@ def main():
             if not weakness:
                 st.balloons()
                 st.success("✨ **Partita solida!** Non hai mostrato debolezze evidenti. Continua così!")
-				
+ 
         with tab_replay:
             col_board, col_narrative = st.columns([1.5, 1])
             
@@ -1124,8 +1124,8 @@ def main():
                 )
                 st.image(f"data:image/svg+xml;base64,{base64.b64encode(board_svg.encode()).decode()}", width="stretch")
                     
-				
-		with col_narrative:
+                
+        with col_narrative:
                 st.markdown(f"### Mossa {current.move_no} ({current.move_san})")
                 
                 cls_lower = current.classification.lower()
@@ -1180,7 +1180,7 @@ def main():
                 # Avviso visivo immediato per Blunder/Mistake
                 if current.classification in ["Blunder", "Mistake"]:
                     st.error(f"⚠️ La mossa corretta era: **{current.best_move}**")
-					
+ 
         with tab_coach:
             st.markdown("### 👨‍🏫 Profilo Psicologico")
             if stats.psych_profile:
