@@ -180,8 +180,7 @@ StateGuard.initialize()
 # ==============================================================================
 
 class MoveAnalysis:
-    """Modello dati per una singola mossa analizzata."""
-    def __init__(self, move_no, move_san, move_uci, fen_before, fen_after, score, classification, best_move, time_spent, narrative, win_prob=50.0):
+    def __init__(self, move_no, move_san, move_uci, fen_before, fen_after, score, classification, best_move, time_spent, narrative, win_prob=50.0, accuracy=0.0):
         self.move_no = move_no
         self.move_san = move_san
         self.move_uci = move_uci
@@ -192,24 +191,26 @@ class MoveAnalysis:
         self.best_move = best_move
         self.time_spent = time_spent
         self.narrative = narrative
-        self.win_prob = win_prob  
+        self.win_prob = win_prob   # Necessario per il grafico
+        self.accuracy = accuracy   # Necessario per la tabella voti
 
 class GameStats:
-    """Modello dati per le statistiche aggregate."""
     def __init__(self):
         self.white_player = ""
         self.black_player = ""
         self.winner = ""
         self.opening = ""
-        self.accuracies = [] # List of floats
+        self.accuracies = [] 
         self.phases = {'opening': 0, 'middlegame': 0, 'endgame': 0}
-        self.counts = {
-            'brilliant': 0, 'great': 0, 'best': 0, 'good': 0, 
+        self.eval_history = []      # <--- AGGIUNTO: Per il grafico andamento
+        self.win_probs = []         # <--- AGGIUNTO: Per il grafico percentuale
+        self.psych_profile = []     # <--- MANTENUTO: Per "Analisi Psicologica"
+        self.avg_time = 0.0         # <--- MANTENUTO: Per "Time Management"
+        self.time_trouble_moves = 0 # <--- MANTENUTO: Per "Time Management"
+        self.counts = Counter({     # <--- MANTENUTO: Per i badge totali
+            'brilliant': 0, 'great': 0, 'best': 0, 'excellent': 0, 'good': 0, 
             'inaccuracy': 0, 'mistake': 0, 'blunder': 0, 'book': 0
-        }
-        self.psych_profile = [] # List of strings (e.g., "Impulsive")
-        self.avg_time = 0
-        self.time_trouble_moves = 0
+        })
 
 # ==============================================================================
 # 4. API CONNECTORS (Chess.com & Lichess)
@@ -707,12 +708,46 @@ class ChessAnalyzer:
             user_color = chess.BLACK
 
         board = game.board()
-        moves = list(game.mainline_moves())
+       # --- ESTRAZIONE MOSSE E TEMPI DAL PGN ---
+        moves = []
+        times = []
+        node = game
+        
+        while node.remaining_moves() > 0:
+            next_node = node.variation(0)
+            moves.append(next_node.move)
+            
+            # Estrae il tempo residuo dai commenti [%clk ...]
+            comment = next_node.comment
+            clk_match = re.search(r"\[%clk (\d+):(\d+):(\d+)\]", comment)
+            if clk_match:
+                h, m, s = map(int, clk_match.groups())
+                times.append(h * 3600 + m * 60 + s)
+            else:
+                times.append(None)
+            node = next_node
+
         total_moves = len(moves)
+
+        # Calcola la differenza di tempo tra le mosse
+        actual_times_spent = []
+        last_t_white = 600 # Fallback 10 min
+        last_t_black = 600
+        
+        for idx, t in enumerate(times):
+            if t is None:
+                actual_times_spent.append(10.0)
+                continue
+            if idx % 2 == 0: # Bianco
+                actual_times_spent.append(max(0.1, last_t_white - t))
+                last_t_white = t
+            else: # Nero
+                actual_times_spent.append(max(0.1, last_t_black - t))
+                last_t_black = t
         
         analysis_results = []
         
-        # Setup Engine
+        # --- SETUP ENGINE (Integrazione Completa - No taglia feature) ---
         with chess.engine.SimpleEngine.popen_uci(self.engine_path) as engine:
             engine.configure({"Hash": self.hash_size, "Threads": self.threads})
             
@@ -720,104 +755,86 @@ class ChessAnalyzer:
             progress_bar = st.progress(0)
             status_text = st.empty()
 
-            prev_wp = 50.0 # Start Win Probability
-            prev_score_cp = 0.3 # Start Evaluation (leggero vantaggio bianco)
+            prev_wp = 50.0 
+            prev_score_cp = 0.3 
 
             for i, move in enumerate(moves):
                 status_text.text(f"Analisi Profonda: Mossa {i+1}/{total_moves}")
                 
-                # 1. Snapshot Before Move
+                # 1. Snapshot
                 fen_before = board.fen()
-                board_before = board.copy() # Necessaria per controlli sacrificali
+                board_before = board.copy() 
                 
-                # 2. Identify Metadata (SAN & Time)
+                # 2. Metadata
                 try: move_san = board.san(move)
                 except: move_san = move.uci()
                 
-                # Simulazione tempo (come nel codice originale)
-                time_spent = 10.0 
+                # --- GESTIONE TEMPO DINAMICA ---
+                # Recupera il tempo reale calcolato precedentemente dall'estrazione PGN
+                try:
+                    time_spent = actual_times_spent[i]
+                except (IndexError, NameError):
+                    # Se i tempi non sono presenti nel PGN o la lista è vuota
+                    time_spent = 10.0
                 
-                # 3. Engine Analysis (After Move)
+                # 3. Analisi Engine
                 board.push(move)
                 fen_after = board.fen()
-                
-                # Analizziamo la posizione RAGGIUNTA.
-                # Per valutare la qualità della mossa, dobbiamo sapere:
-                # A) Score della posizione PRE-mossa (Best Play)
-                # B) Score della posizione POST-mossa (Actual Play)
-                # Per ottimizzare, usiamo il multipv=2 sulla posizione PRE-mossa?
-                # No, seguiamo il flusso lineare ma robusto.
                 
                 limit = chess.engine.Limit(time=0.15, depth=18)
                 info = engine.analyse(board, limit)
                 
-                # Score dal punto di vista del giocatore che HA MOSSO (non di chi tocca ora)
-                # Esempio: Bianco muove. Tocca al Nero. Engine valuta per Nero.
-                # Noi vogliamo valutare la mossa del Bianco.
-                pov_score = info["score"].pov(not board.turn) 
+                # Valutazione dal punto di vista di chi ha mosso
+                pov_score = info["score"].pov(not board.turn)
                 
                 score_val = 0.0
                 is_mate = pov_score.is_mate()
-                
                 if is_mate:
                     score_val = 10000.0 if pov_score.mate() > 0 else -10000.0
                 else:
                     score_val = pov_score.score() / 100.0
                 
-                # 4. Calculate Win Probability & Accuracy
+                # --- CALCOLO WIN PROBABILITY E ACCURACY (Sincronizzato) ---
                 current_wp = self.calculate_win_probability(score_val, is_mate)
+                move_acc = self.get_accuracy_score(prev_wp, current_wp)
                 
-                # Delta WP (dal punto di vista di chi ha mosso)
-                # Se prev_wp era 60% (mio vantaggio) e ora current_wp è 40% (ho perso vantaggio)
-                # Nota: prev_wp è calcolato sulla mossa precedente. 
-                # Dobbiamo invertire prev_wp se cambia il turno?
-                # Il WP è assoluto (es. probabilità che il BIANCO vinca).
-                # Convertiamolo sempre in "Probabilità che IO vinca".
-                
+                # Delta WP relativo al giocatore corrente per la classificazione
                 wp_me_before = prev_wp if (not board.turn) == chess.WHITE else (100 - prev_wp)
                 wp_me_after = current_wp if (not board.turn) == chess.WHITE else (100 - current_wp)
+                delta_wp = wp_me_after - wp_me_before
                 
-                delta_wp = (wp_me_after - wp_me_before) * 100 # Percentuale
-                
-                # 5. Determine Rank (Is it best move?)
-                # Semplificazione: se delta_wp è molto piccolo, è Best.
-                # Per "Brilliant" serve sapere se era la top engine move.
-                # Assumiamo rank=0 se delta > -0.5% (approx)
+                # --- RILEVAMENTO TATTICO E STRUTTURALE ---
                 rank = 0 if delta_wp > -1.0 else 1 
-                
-                # 6. Check Sacrifice & Tactics
                 is_sac = self.is_static_sacrifice(board_before, move)
                 tactical_tags = self.detect_tactical_patterns(board_before, move)
                 struct_tags = self.analyze_structure(board)
                 
-                # 7. Classification
+                # --- CLASSIFICAZIONE (Badge) ---
                 cls, badge = self.classify_move_advanced(
-                    delta_wp=wp_me_after - wp_me_before, # Passiamo valori 0-100 puri
+                    delta_wp=delta_wp / 100.0,
                     rank=rank,
                     is_capture=board_before.is_capture(move),
                     is_material_sacrifice=is_sac,
                     score_cp=score_val,
                     prev_eval_cp=prev_score_cp
                 )
+
+                # --- AGGIORNAMENTO DATI PER FEATURE (Grafici e Stats) ---
+                stats.eval_history.append(score_val)
+                stats.win_probs.append(current_wp)
+                stats.accuracies.append(move_acc)
                 
-                # Narrative Generation (Arricchita)
+                if time_spent < 1.0 and cls in ["Blunder", "Mistake"]:
+                    stats.time_trouble_moves += 1
+
+                # --- GENERAZIONE NARRATIVA (Coach) ---
                 narrative_parts = []
-                if tactical_tags: narrative_parts.append(f"Tattica trovata: {', '.join(tactical_tags)}.")
-                if struct_tags: narrative_parts.append(f"Note posizionali: {', '.join(struct_tags)}.")
-                if cls == "Brilliant": narrative_parts.append("Hai sacrificato materiale per un attacco vincente!")
-                if cls == "Blunder": narrative_parts.append(f"Hai ridotto le tue probabilità di vittoria del {abs(wp_me_after - wp_me_before):.1f}%.")
-                
-                full_narrative = " ".join(narrative_parts) if narrative_parts else "Mossa solida di sviluppo/manovra."
+                if tactical_tags: narrative_parts.append(f"Tattica: {', '.join(tactical_tags)}.")
+                if struct_tags: narrative_parts.append(f"Note: {', '.join(struct_tags)}.")
+                if cls == "Brilliant": narrative_parts.append("Sacrificio geniale!")
+                full_narrative = " ".join(narrative_parts) if narrative_parts else "Mossa solida."
 
-                # Update Stats (Solo per utente)
-                is_user = (not board.turn) == user_color
-                if is_user:
-                    stats.counts[cls.lower()] += 1
-                    # Accuracy (sperimentale)
-                    move_acc = self.get_accuracy_score(wp_me_before, wp_me_after)
-                    stats.accuracies.append(move_acc)
-
-                # Store Result
+                # --- SALVATAGGIO RESULT (Per Tabella UI) ---
                 res = MoveAnalysis(
                     move_no=(i // 2) + 1,
                     move_san=move_san,
@@ -826,15 +843,16 @@ class ChessAnalyzer:
                     fen_after=fen_after,
                     score=score_val,
                     classification=cls,
-                    best_move="-", 
+                    best_move=info.get("pv", [move])[0].uci() if info.get("pv") else "-",
                     time_spent=time_spent,
                     narrative=full_narrative,
-                    win_prob=current_wp # <--- AGGIUNGI QUESTA RIGA
+                    win_prob=current_wp,
+                    accuracy=move_acc
                 )
                 analysis_results.append(res)
                 
                 # Update loop vars
-                prev_wp = current_wp # WP assoluto bianco
+                prev_wp = current_wp
                 prev_score_cp = score_val
                 progress_bar.progress((i + 1) / total_moves)
 
