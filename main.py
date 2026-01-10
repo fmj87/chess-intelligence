@@ -181,16 +181,18 @@ StateGuard.initialize()
 
 class MoveAnalysis:
     """Modello dati per una singola mossa analizzata."""
-    def __init__(self, move_no, move_san, fen, score, classification, best_move, time_spent, narrative, fen_before):
+    def __init__(self, move_no, move_san, move_uci, fen_before, fen_after, score, classification, best_move, time_spent, narrative, win_prob=50.0):
         self.move_no = move_no
         self.move_san = move_san
-        self.fen_after = fen        # Cambiato da self.fen a self.fen_after
+        self.move_uci = move_uci
         self.fen_before = fen_before 
+        self.fen_after = fen_after
         self.score = score
         self.classification = classification 
         self.best_move = best_move
         self.time_spent = time_spent
         self.narrative = narrative
+        self.win_prob = win_prob  
 
 class GameStats:
     """Modello dati per le statistiche aggregate."""
@@ -482,27 +484,19 @@ class ChessAnalyzer:
     # --------------------------------------------------------------------------
 
     def detect_tactical_patterns(self, board: chess.Board, move: chess.Move) -> List[str]:
-        """
-        Analizza la mossa usando i bitboards per identificare pattern tattici.
-        Mantiene TUTTE le tue feature originali e corregge i bug dei tipi.
-        """
         tactics = []
-        
-        # Eseguiamo la mossa su una copia per vedere lo stato risultante
         board_after = board.copy()
         board_after.push(move)
         
-        mover_color = not board_after.turn # Chi ha appena mosso
+        mover_color = not board_after.turn
         opponent = board_after.turn
-        
         to_sq = move.to_square
         piece = board_after.piece_at(to_sq)
         
         if not piece: return []
 
-        # 1. FORCHETTA (Fork)
+        # 1. FORCHETTA (Fork) - Corretti tipi int
         attacks_bb = board_after.attacks(to_sq)
-        # Fix: Conversione esplicita in int per evitare l'errore SquareSet
         enemy_pieces = int(board_after.occupied_co[opponent]) & int(attacks_bb)
         
         attacked_valuable_count = 0
@@ -511,92 +505,78 @@ class ChessAnalyzer:
         for sq in attacked_squares:
             target = board_after.piece_at(sq)
             if target:
-                # Se attacchiamo il Re o un pezzo di valore >= al nostro
                 if target.piece_type == chess.KING or \
                    self.PIECE_VALUES.get(target.piece_type, 0) >= self.PIECE_VALUES.get(piece.piece_type, 0):
-                    # Escludiamo scambi normali di pedoni
                     if not (piece.piece_type == chess.PAWN and target.piece_type == chess.PAWN):
                         attacked_valuable_count += 1
         
         if attacked_valuable_count >= 2:
             tactics.append("Forchetta 🍴")
 
-        # 2. INCHIODATURA (Pin) & INFILATA (Skewer)
+        # 2. INCHIODATURA & INFILATA
         king_sq = board_after.king(opponent)
         if king_sq is not None:
             if board_after.is_check():
-                # Feature: SCACCO DI SCOPERTA
+                # Corretto: king_sq in/not in invece di .contains()
                 if king_sq not in board_after.attacks(to_sq):
                     tactics.append("Attacco di Scoperta 🎁")
                 
-                # Feature: INFILATA (Skewer) al Re
+                # Infilata - Corretti tipi int
                 beyond_ray = chess.ray(to_sq, king_sq) ^ chess.ray(king_sq, to_sq)
-                # FIX DEFINITIVO: int() su entrambi i termini del raggio e dell'occupazione
                 if int(beyond_ray) & int(board_after.occupied_co[opponent]):
                     tactics.append("Infilata 🏹")
             else:
-                # Feature: INCHIODATURA (Pin)
                 for sq in attacked_squares:
                     if board_after.is_pinned(opponent, sq):
                         tactics.append("Inchiodatura 📍")
                         break
-
-        # 3. RIMOZIONE DEL DIFENSORE
-        # Se catturiamo un pezzo, controlliamo se ora altri pezzi sono indifesi
-        if board.is_capture(move):
-            # Logica base: se abbiamo rimosso un pezzo che proteggeva una casa ora attaccata
-            # Rimane una feature complessa, ma il tag può essere attivato dal motore se la precisione cala
-            pass 
-
-        return list(set(tactics)) # Rimuove eventuali tag duplicati
+        return list(set(tactics))
 
     # --------------------------------------------------------------------------
     # 3. STRUCTURAL & POSITIONAL ANALYSIS
     # --------------------------------------------------------------------------
 
     def analyze_structure(self, board: chess.Board) -> List[str]:
-        """
-        Analizza la struttura statica dei pedoni e posizionamento pezzi.
-        """
+        """Analizza la struttura pedonale e le colonne usando maschere bitwise."""
         tags = []
+        for color in [chess.WHITE, chess.BLACK]:
+            my_pawns = board.pieces(chess.PAWN, color)
+            for sq in my_pawns:
+                file = chess.square_file(sq)
+                file_mask = chess.BB_FILES[file]
+                
+                # 1. PEDONI ISOLATI
+                adj_files_list = [f for f in [file - 1, file + 1] if 0 <= f <= 7]
+                is_isolated = True
+                for adj_f in adj_files_list:
+                    # Fix int() per l'operazione bitwise su SquareSet
+                    if int(chess.BB_FILES[adj_f]) & int(my_pawns):
+                        is_isolated = False
+                        break # Trovato difensore, esce dal loop
+                
+                if is_isolated: 
+                    tags.append("Pedone Isolato 🛡️")
+                
+                # 2. PEDONI DOPPIATI
+                # Fix int() per contare i bit nella maschera del file
+                if bin(int(file_mask) & int(my_pawns)).count('1') > 1:
+                    tags.append("Pedone Doppiato 🧬")
+
+        # 3. COLONNE APERTE (Open Files)
+        # Analizziamo se non ci sono pedoni su una colonna dove si trova un pezzo importante
         white_pawns = board.pieces(chess.PAWN, chess.WHITE)
         black_pawns = board.pieces(chess.PAWN, chess.BLACK)
+        all_pawns = int(white_pawns) | int(black_pawns)
         
-        # Determina chi muove (analizziamo la struttura di chi ha appena mosso o del turno attuale?)
-        # Analizziamo la board corrente
-        turn = board.turn
-        my_pawns = white_pawns if turn == chess.WHITE else black_pawns
-        opp_pawns = black_pawns if turn == chess.WHITE else white_pawns
-        
-        for sq in my_pawns:
-            file = chess.square_file(sq)
-            rank = chess.square_rank(sq)
-            
-            # Pedone Isolato (Nessun pedone amico nelle colonne adiacenti)
-            adj_files = {f for f in [file - 1, file + 1] if 0 <= f <= 7}
-            is_isolated = True
-            for af in adj_files:
-                # Maschera colonna
-                file_mask = chess.BB_FILES[af]
-                if int(file_mask) & int(my_pawns):
-                    is_isolated = False
+        for f in range(8):
+            file_mask = int(chess.BB_FILES[f])
+            if not (all_pawns & file_mask):
+                # Se la colonna è occupata da una torre o donna del giocatore di turno
+                if file_mask & int(board.occupied_co[board.turn]):
+                    tags.append("Colonna Aperta 🛣️")
                     break
-            
-            if is_isolated:
-                tags.append("Pedone Isolato")
-                break # Ne basta uno per flaggare la struttura
-        
-        # Torre su colonna aperta
-        my_rooks = board.pieces(chess.ROOK, turn)
-        for sq in my_rooks:
-            file = chess.square_file(sq)
-            file_mask = chess.BB_FILES[file]
-            # Colonna aperta se nessun pedone (nè bianco nè nero)
-            if not (int(white_pawns | black_pawns) & int(file_mask)):
-                tags.append("Torre su Colonna Aperta")
-                break
 
-        return list(set(tags)) # Rimuovi duplicati
+        return list(set(tags))
 
     # --------------------------------------------------------------------------
     # 4. MOVE CLASSIFICATION LOGIC (THE "LABELS")
@@ -626,12 +606,10 @@ class ChessAnalyzer:
         # a) Mossa vincente (o che mantiene parità difficile)
         # b) Unica mossa buona (le altre perdono significativamente WP)
         # c) Non necessariamente la best move assoluta, ma non un blunder
-        if rank == 0 and delta_wp > -1.0:
-            # Logic semplificata: se è la best move ed è stabile
-            # In un sistema reale confronteremmo con la 2nd best move
-            pass 
-        if delta_wp >= 0.0 and is_capture and rank <= 1:
-             return "Great", "good" # Placeholder, logica "Great" richiede confronto con 2nd best
+        # --- 2. GREAT MOVE (!) ---
+        # Se è la mossa migliore (rank 0) e la perdita di probabilità è quasi nulla
+        if rank == 0 and delta_wp > -0.5:
+             return "Great", "good"
 
         # --- 3. STANDARD CLASSIFICATION (Based on WP Loss) ---
         # Delta WP è negativo se peggioriamo (es. da 50% a 30% -> -20)
@@ -843,13 +821,15 @@ class ChessAnalyzer:
                 res = MoveAnalysis(
                     move_no=(i // 2) + 1,
                     move_san=move_san,
-                    fen=fen_after,
+                    move_uci=move.uci(),
+                    fen_before=fen_before,
+                    fen_after=fen_after,
                     score=score_val,
                     classification=cls,
-                    best_move="-", # Richiederebbe seconda analisi
+                    best_move="-", 
                     time_spent=time_spent,
                     narrative=full_narrative,
-                    fen_before=fen_before
+                    win_prob=current_wp # <--- AGGIUNGI QUESTA RIGA
                 )
                 analysis_results.append(res)
                 
