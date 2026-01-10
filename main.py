@@ -526,7 +526,7 @@ class ChessAnalyzer:
         if king_sq is not None:
             if board_after.is_check():
                 # Feature: SCACCO DI SCOPERTA
-                if not board_after.attacks(to_sq).contains(king_sq):
+                if king_sq not in board_after.attacks(to_sq):
                     tactics.append("Attacco di Scoperta 🎁")
                 
                 # Feature: INFILATA (Skewer) al Re
