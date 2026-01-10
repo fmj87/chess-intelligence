@@ -709,23 +709,29 @@ class ChessAnalyzer:
 
         board = game.board()
        # --- ESTRAZIONE MOSSE E TEMPI DAL PGN ---
+        # --- CORREZIONE ESTRAZIONE MOSSE E TEMPI ---
         moves = []
         times = []
-        node = game
         
-        while node.remaining_moves() > 0:
-            next_node = node.variation(0)
-            moves.append(next_node.move)
+        # Iniziamo dal primo nodo (la prima mossa)
+        node = game.next() 
+        
+        while node is not None:
+            moves.append(node.move)
             
             # Estrae il tempo residuo dai commenti [%clk ...]
-            comment = next_node.comment
+            comment = node.comment
             clk_match = re.search(r"\[%clk (\d+):(\d+):(\d+)\]", comment)
             if clk_match:
                 h, m, s = map(int, clk_match.groups())
                 times.append(h * 3600 + m * 60 + s)
             else:
                 times.append(None)
-            node = next_node
+            
+            # Passa alla mossa successiva in modo lineare
+            node = node.next()
+
+        total_moves = len(moves)
 
         total_moves = len(moves)
 
